@@ -22,6 +22,7 @@ from pydantic_autocli import param
 import hdbscan
 import torch
 import timm
+from umap import UMAP
 
 from .utils import BaseMLCLI, BaseMLArgs
 
@@ -95,6 +96,38 @@ class CLI(BaseMLCLI):
             f.create_dataset('orders', data=df['order'].values)
             f.create_dataset('filenames', data=df['filename'].values)
         print(f'wrote {o}')
+
+    class UMAPArgs(CommonArgs):
+        key: str = 'DBSCAN cluster'
+
+    def run_umap(self, a:UMAPArgs):
+        df  = pd.read_csv('./data/DLBCL-Morph/DBSCAN_clusters_with_ids.csv', index_col=0)
+        with h5py.File('./data/DLBCL-Morph/global_slide_features.h5', 'r') as f:
+            features = f['features'][()]
+            names = f['names'][()]
+            orders = f['orders'][()]
+            labels = []
+            for name, order in zip(names, orders):
+                label = f'{name.decode("utf-8")}_{order}'
+                labels.append(df.loc[label, a.key])
+
+        labels = pd.DataFrame({'labels': labels})
+
+        umap = UMAP()
+        embs = umap.fit_transform(features)
+        unique_labels = sorted(np.unique(labels))
+        cmap = plt.get_cmap('tab20')
+        for i, label in enumerate(unique_labels):
+            mask = labels['labels'] == label
+            if isinstance(label, (int, np.integer)):
+                c = 'gray' if label < 0 else cmap(label)
+            else:
+                c = cmap(i)
+            print(c)
+            plt.scatter(embs[mask,0], embs[mask,1], c=c, label=f'{a.key} {label}')
+        plt.savefig(f'./out/umap_{a.key}.png')
+        # plt.show()
+
 
     class GlobalClusterArgs(CommonArgs):
         noshow: bool = False
