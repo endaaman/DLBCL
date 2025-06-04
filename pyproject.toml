@@ -69,7 +69,7 @@ requires-dist = ["torch", "einops"]
 
 
 [tool.taskipy.tasks]
-cli = "python -m dlbcl.cli"
+main = "python -m dlbcl.main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dlbcl"]
