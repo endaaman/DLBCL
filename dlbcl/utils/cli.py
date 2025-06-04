@@ -21,5 +21,5 @@ class BaseMLCLI(AutoCLI):
         pass
 
     def _pre_common(self, a:BaseMLArgs):
-        fix_global_seed(self.a.seed)
+        fix_global_seed(a.seed)
         super()._pre_common(a)

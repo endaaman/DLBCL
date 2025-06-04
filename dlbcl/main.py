@@ -1,5 +1,7 @@
 import os
+import re
 import warnings
+from pathlib import Path
 
 from glob import glob
 from tqdm import tqdm
@@ -16,6 +18,7 @@ import umap
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
+from pydantic_autocli import param
 import hdbscan
 import torch
 import timm
@@ -30,12 +33,20 @@ class CLI(BaseMLCLI):
     class CommonArgs(BaseMLArgs):
         # This includes `--seed` param
         device: str = 'cuda'
-        pass
+        dataset: str = param('morph', choices=['morph', 'patho2'])
+
+    def pre_common(self, a:CommonArgs):
+        if a.dataset == 'morph':
+            self.dataset_dir = Path('./data/DLBCL-Morph/')
+        elif a.dataset == 'pathp2':
+            self.dataset_dir = Path('./data/DLBCL-Patho2/')
+        else:
+            raise ValueError('Invalid dataset', a.dataset)
 
     class ExtractGlobalFeaturesArgs(CommonArgs):
         noshow: bool = False
 
-    def run_extract_global_features(self, a):
+    def run_gather_features(self, a):
         featuress = []
         lengths = []
         for dir in sorted(glob('data/dataset/*')):
@@ -52,14 +63,21 @@ class CLI(BaseMLCLI):
             f.create_dataset('global_features', data=features)
             f.create_dataset('lengths', data=np.array(lengths))
 
-    def run_extract_slide_features(self, a):
+    def run_gather_slide_features(self, a):
         data = []
         features = []
-        for dir in sorted(glob('data/dataset/*')):
+        dirs = sorted(glob(str(self.dataset_dir / 'dataset/*')))
+        assert len(dirs) > 0
+        for dir in tqdm(dirs):
             name = os.path.basename(dir)
             for i, h5_path in enumerate(sorted(glob(f'{dir}/*.h5'))):
+                m = re.match(r'^\d\d\d\d\d_\d\.h5$', Path(h5_path).name)
+                if not m:
+                    print('skip', h5_path)
+                    continue
+                print('loading', h5_path)
                 with h5py.File(h5_path, 'r') as f:
-                    features.append(f['slide_feature'][:])
+                    features.append(f['gigapath/slide_feature'][:])
                 data.append({
                     'name': name,
                     'order': i,
@@ -70,7 +88,7 @@ class CLI(BaseMLCLI):
         features = np.array(features)
         print('features', features.shape)
 
-        o = 'data/slide_features.h5'
+        o = str(self.dataset_dir / 'global_slide_features.h5')
         with h5py.File(o, 'w') as f:
             f.create_dataset('features', data=features)
             f.create_dataset('names', data=df['name'].values)
