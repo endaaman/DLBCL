@@ -1,0 +1,22 @@
+Column name,Description
+patient_id,Anonymized and randomized identifier of each patient
+MYC IHC,Results of c-Myc immunohistochemical staining (% positive)
+BCL2 IHC,Results of BCL2 immunohistochemical staining (% positive)
+BCL6 IHC,Results of BCL6 immunohistochemical staining (% positive)
+CD10 IHC,Results of CD10 immunohistochemical staining (% positive)
+MUM1 IHC,Results of MUM1 immunohistochemical staining (% positive)
+HANS,"Cell of origin prediction based on the Hans algorithm (Hans CP, Weisenburger DD, Greiner TC, et al: Confirmation of the molecular classification of diffuse large B-cell lymphoma by immunohistochemistry using a tissue microarray. Blood 103:275-282, 2004)"
+BCL2 FISH,Results of BCL2 break-apart fluorescence in situ hybridization assay
+BCL6 FISH,Results of BCL6 break-apart fluorescence in situ hybridization assay
+MYC FISH,Results of MYC break-apart fluorescence in situ hybridization assay
+Age,The age (in years) of the patient at the start of the treatment
+ECOG PS,ECOG Performance Status
+LDH,"1 if the amount of Lactate Dehydrogenase (LDH) in the patients blood is high, else 0"
+EN,The number of extranodal sites
+Stage,"Modified Ann Arbor staging system, in which higher stage numbers indicate more widespread dissemination of lymphoma throughout the body (Lister TA, Crowther D, Sutcliffe SB, et al. Report of a committee convened to discuss the evaluation and staging of patients with Hodgkin’s disease: Cotswolds meeting. J Clin Oncol 1989;7:1630-6.)"
+IPI Score,International prognostic index score (Project TIN-HsLPF. A predictive model for aggressive non-Hodgkin's lymphoma. The International Non-Hodgkin's Lymphoma Prognostic Factors Project.  N Engl J Med   1993 ;  329 : 987 –994.)
+IPI Risk Group (4 Class),International prognostic index risk group (International Non-Hodgkin's Lymphoma Prognostic Factors Project. A predictive model for aggressive non-Hodgkin's lymphoma. N Engl J Med. 1993 Sep 30;329(14):987-94. doi: 10.1056/NEJM199309303291402. PMID: 8141877.)
+RIPI Risk Group,"Revised international prognostic index risk group (Laurie H. Sehn, Brian Berry, Mukesh Chhanabhai, Catherine Fitzgerald, Karamjit Gill, Paul Hoskins, Richard Klasa, Kerry J. Savage, Tamara Shenkier, Judy Sutherland, Randy D. Gascoyne, Joseph M. Connors; The revised International Prognostic Index (R-IPI) is a better predictor of outcome than the standard IPI for patients with diffuse large B-cell lymphoma treated with R-CHOP. Blood 2007; 109 (5): 1857–1861.)"
+OS,"Overall Survival, length of time (in years) from the end of treatment until death or last follow-up"
+PFS,"Progression Free Survival, the number of years a patient has not progressed or relapsed"
+Follow-up Status,"1 if the patient was deceased at the time of last follow-up, else 0"
