@@ -1,171 +1,144 @@
 # DLBCL 病理画像解析プロジェクト
 
-## 研究背景・イントロダクション
+## 研究背景
 
-SSL（Self-Supervised Learning）で訓練された病理組織基盤モデル（Prov-GigaPath, UNIなど）によって、病理画像から高品質な埋め込み情報を得ることができるようになった。これらのモデルは様々なデータセットを通じて下流タスクに適用された結果、既存のアプローチを大きく超える性能を示している。
+SSL（Self-Supervised Learning）で訓練された病理組織基盤モデル（Prov-GigaPath）によって、病理画像から高品質な埋め込み情報を得ることができるようになった。本研究では、DLBCL（Diffuse Large B-cell Lymphoma：びまん性大細胞型B細胞リンパ腫）の病理組織画像から抽出された特徴量と臨床データとの関連を統計的手法で解析し、新たな形態病理学的知見を得ることを目指す。
 
-DLBCL（Diffuse Large B-cell Lymphoma：びまん性大細胞型B細胞リンパ腫）では、腫瘍は症例ごとに様々な形態を呈し、形態学的にはすでにいくつかの亜型分類が知られているが、それらと予後や免疫組織学的特徴との関係性は十分に明らかになっていない。さらに、従来の形態学的評価は主観的な要素が強く、定量的・客観的な評価手法の確立が求められている。
-
-## プロジェクト概要
-
-本研究では、DLBCLの病理組織画像から基盤モデル（Prov-GigaPath）によって抽出された特徴量と臨床データとの関連を統計的手法で解析し、新たな形態病理学的知見を得ることを目指す。
-
-### 実験・検証方針
-
-**慎重で段階的なアプローチ**:
-本研究では以下の方針に基づいて慎重に実験・検証を進める：
-
-1. **段階的検証**: 小規模な予備実験から開始し、結果を慎重に評価してから次段階に進む
-2. **再現性の確保**: 全ての実験でseed値を固定し、結果の再現性を保証
-3. **統計的妥当性**: 適切な統計手法の選択、サンプルサイズの考慮、多重検定補正の実施
-4. **比較検証**: 複数の手法で同様の解析を行い、結果の頑健性と一貫性を確認
-5. **慎重な解釈**: 統計的有意性と生物学的・臨床的意義を明確に区別して考察
-6. **既存手法との比較**: 新しい手法は必ず既存手法（slide_feature）との比較から開始
-
-**品質管理**:
-- 各段階で中間結果を詳細に記録・検討
-- 予期しない結果や外れ値については原因を慎重に調査
-- データの前処理・変換手順を明確に文書化
-
-### 技術的背景：slide_featureの生成過程
-
-1. **パッチ分割**: 各WSIを256×256ピクセルのパッチに分割
-2. **パッチ特徴抽出**: 各パッチからProv-GigaPathにより1536次元の特徴量を抽出
-3. **スライドレベル集約**: パッチ特徴量と座標情報をGigaPathのLongNet（Long-context Transformer）に入力し、768次元のslide_featureを生成
-
-### 研究課題：WSI代表性の問題
-
-**slide_featureの限界**:
-現在のslide_featureは、全パッチの情報をLongNetで集約して得られるが、以下の課題が存在する：
-
-1. **情報損失の可能性**: 数千〜数万のパッチ情報を768次元に圧縮する過程で、重要な局所的特徴が失われる可能性
-2. **均一化バイアス**: 異質な腫瘍組織内の多様性（腫瘍内不均一性）が平均化されてしまう懸念
-3. **ノイズパッチの影響**: 背景組織や アーティファクトを含むパッチがスライドレベル特徴に悪影響を与える可能性
-
-**検証アプローチ**: 
-これらの課題を検証するため、以下の比較検討を行う：
-
-1. **代表パッチ選択法の開発**: WSIを適切に代表するパッチの選択手法を検討
-2. **パッチレベル解析**: 選択されたパッチ群での同様の統計解析を実施
-3. **適正性評価**: slide_featureとパッチベース解析の結果比較により、各手法の適正性を評価
-
-## 現在の進捗状況
-
-### Phase 1: 統計解析による基礎検討 ✅ **完了**
-
-**実施内容:**
-- DLBCL-Morphデータセット（149症例、202WSI）を使用
-- slide_feature（768次元）と臨床データの統計解析を実行
-- 相関分析、群間比較、多重検定補正を実施
-
-**主要結果:**
-- **有意な相関関係**: 32個の特徴量-臨床変数ペア（FDR補正後）
-- **有意な群間差**: 17個の特徴量-臨床変数ペア（FDR補正後）
-
-**重要な発見:**
-1. **予後との関連**:
-   - PFS（無増悪生存期間）と feature_740: r=-0.35, p=0.0015
-   - OS（全生存期間）と複数特徴量: r=-0.29~-0.30
-
-2. **免疫染色パターンとの関連**:
-   - BCL6 IHC と複数特徴量で中程度の相関（r=0.29~0.31）
-   - CD10 IHC との負の相関も確認
-
-3. **臨床因子別の特徴量差**:
-   - EN（節外病変数）：7群間でANOVA p=0.01
-   - LDH（乳酸脱水素酵素）：2群間でKruskal-Wallis p=0.01
-   - HANS（細胞起源分類）：2群間でt-test p=0.02
-
-**結論:** 
-従来のUMAPによる可視化では見えなかった関連性が、統計的手法により明確に確認された。slide_featureは臨床データと有意な関連を持つ。
-
-## 今後の分析方針
-
-### Phase 2: パッチレベル特徴量の活用 🔄 **次のステップ**
-
-**目的:**
-slide_featureの有効性が確認されたが、WSI代表性の検証とより詳細な病理学的知見の獲得のため、パッチレベル解析を実施する。
-
-**主要課題：代表パッチ選択**
-1. **選択基準の確立**:
-   - 腫瘍組織密度に基づく選択
-   - 特徴量多様性を考慮した選択
-   - クラスタリングベースの代表選択
-
-2. **選択手法の検討**:
-   - ランダムサンプリング vs 戦略的サンプリング
-   - 症例内均等選択 vs 重要度ベース選択
-   - 固定数選択 vs 比例選択
-
-**実施予定:**
-1. **パッチレベル集約手法の検討**
-   - 統計量ベース集約（平均、分散、歪度、尖度など）
-   - クラスタリングベース集約
-   - Attention機構による重み付き集約
-
-2. **代表性評価**
-   - slide_featureとパッチベース特徴量の相関分析
-   - 臨床関連性の比較（どちらがより強い関連を示すか）
-   - 予測精度の比較
-
-3. **局所的パターン解析**
-   - 各パッチの特徴量と臨床データの関連
-   - 腫瘍内不均一性の定量化
-   - 空間的特徴パターンの解析
-
-4. **機械学習ベース解析**
-   - Random Forest, XGBoostによる特徴量重要度
-   - 分類・回帰モデルの構築
-   - 特徴量選択手法の適用
-
-### Phase 3: 高度な解析手法 📋 **将来実装**
-
-1. **生存分析の強化**
-   - Cox回帰モデル
-   - ログランク検定
-   - Kaplan-Meier曲線
-
-2. **多変量解析**
-   - 主成分分析（PCA）
-   - 正準相関分析（CCA）
-   - 因子分析
-
-3. **Deep Learning手法**
-   - Attention-based MIL（Multiple Instance Learning）
-   - Graph Neural Networks
-   - 自己教師あり学習
-
-## データセット状況
+## データセット
 
 ### DLBCL-Morph（メインデータセット）
-- 症例数: 149例、WSI数: 202枚
-- slide_features.h5: ✅ 生成済み
-- 臨床データ: 充実（免疫染色、FISH、予後情報）
-- 統計解析: ✅ 完了
+- **症例数**: 149例、**WSI数**: 202枚
+- **臨床データ**: 充実（免疫染色、FISH、予後情報）
+- **状況**: 解析完了 ✅
 
-### DLBCL-Patho2（追加データセット）
-- 症例数: 63例、WSI数: 96枚
-- slide_features.h5: ❌ 未生成
-- 臨床データ: 限定的（主に免疫染色のみ）
-- 統計解析: ❌ 未実施
+### DLBCL-Patho2（検証用データセット）
+- **症例数**: 64例、**WSI数**: 96枚  
+- **臨床データ**: 限定的（主に免疫染色）
+- **状況**: 解析完了 ✅
+
+## 実装済み機能
+
+### 1. クラスタリング解析
+**HDBSCAN**を用いた教師なしクラスタリング：
+- **Morph**: 2クラスター（シルエット係数: 0.178）
+- **Patho2**: 2クラスター（シルエット係数: -0.021）
+- **統合解析**: 両データセット結合でのクラスタリング（297サンプル）
+
+```bash
+# 個別データセットのクラスタリング
+uv run python -m dlbcl.main cluster --dataset morph --target cluster
+uv run python -m dlbcl.main cluster --dataset patho2 --target cluster
+
+# 統合クラスタリング
+uv run python -m dlbcl.main integrated-cluster
+```
+
+### 2. UMAP可視化
+**768次元特徴量**の2次元可視化：
+- 臨床変数別の分布パターン可視化
+- クラスター結果の可視化
+- データセット間比較
+
+```bash
+# 臨床変数別可視化（例）
+uv run python -m dlbcl.main cluster --dataset morph --target HANS
+uv run python -m dlbcl.main cluster --dataset morph --target "Age"
+uv run python -m dlbcl.main cluster --dataset morph --target "IPI Risk Group (4 Class)"
+```
+
+### 3. 統計解析
+**相関解析・群間比較**による特徴量-臨床関連の検出：
+- 多重検定補正（FDR）適用
+- 有意な相関関係: 32個（Morph）
+- 有意な群間差: 17個（Morph）
+
+```bash
+# 統計解析実行
+uv run python -m dlbcl.main statistical-analysis --dataset morph
+uv run python -m dlbcl.main statistical-analysis --dataset patho2
+```
+
+### 4. 生存解析 🆕
+**Kaplan-Meier曲線**とログランク検定：
+- 全体生存率（OS）・無増悪生存率（PFS）
+- 臨床変数別生存解析
+- クラスター別生存解析
+
+```bash
+# 生存解析実行
+uv run python -m dlbcl.main survival-analysis --dataset morph
+uv run python -m dlbcl.main survival-analysis --dataset morph --cluster-based
+```
+
+## 主要解析結果
+
+### クラスタリング結果
+- **Morph**: ノイズポイント55/202サンプル、明確な2クラスター形成
+- **統合解析**: データセット間で明確な分布差を確認
+- **クラスター品質**: Morphで良好、Patho2では要改善
+
+### 生存解析結果（Morph）
+- **年齢**: 高齢群で有意に予後不良（p<0.0001）
+- **LDH**: 高値群で予後良好傾向（p=0.0016, 0.0008）
+- **HANS分類**: 有意差なし（p=0.96, 0.76）
+- **フォローアップ**: 中央値7.54ヶ月、イベント数74/202
+
+### 統計解析結果（既存）
+- **feature_740**: 最強の予後予測因子（PFS: r=-0.35, p=0.0015）
+- **BCL6 IHC**: 複数特徴量と中程度相関（r=0.29-0.31）
+- **CD10 IHC**: 負の相関パターン確認
+
+## 出力ファイル構造
+
+```
+out/
+├── morph/
+│   ├── umap_*.png                     # UMAP可視化（15+ファイル）
+│   ├── hdbscan_clustering_results.csv # クラスタリング結果
+│   └── survival/
+│       ├── OS_overall.png             # 全体生存曲線
+│       ├── PFS_overall.png            # 無増悪生存曲線
+│       ├── OS_Age.png                 # 年齢別生存解析
+│       └── PFS_HANS.png               # HANS別生存解析
+├── patho2/
+│   ├── umap_*.png                     # Patho2 UMAP可視化
+│   └── hdbscan_clustering_results.csv
+├── integrated/
+│   ├── integrated_clustering.png      # 統合クラスタリング結果
+│   └── integrated_clustering_results.csv
+└── statistics/                        # 統計解析結果（既存）
+```
 
 ## 技術スタック
 
-- **基盤モデル**: Prov-GigaPath（LongNet使用）
+- **基盤モデル**: Prov-GigaPath（768次元slide_feature）
+- **クラスタリング**: HDBSCAN
+- **次元削減**: UMAP
+- **生存解析**: lifelines（Kaplan-Meier, log-rank test）
+- **統計解析**: scipy, statsmodels
 - **開発フレームワーク**: pydantic-autocli
-- **統計解析**: scipy, statsmodels, scikit-learn
-- **可視化**: matplotlib, seaborn
-- **データ管理**: h5py, pandas
 
-## 実行コマンド例
+## 利用可能なコマンド
 
 ```bash
-# slide_features生成
-uv run python -m dlbcl.main gather-slide-features --dataset morph
+# データ準備
+uv run python -m dlbcl.main gather-slide-features --dataset [morph|patho2]
 
-# 統計解析実行
-uv run python -m dlbcl.main statistical-analysis --dataset morph --alpha 0.05
+# 基本解析
+uv run python -m dlbcl.main cluster --dataset [morph|patho2] --target [cluster|HANS|Age|...]
+uv run python -m dlbcl.main integrated-cluster
+uv run python -m dlbcl.main statistical-analysis --dataset [morph|patho2]
 
-# 結果確認
-ls out/statistics/
+# 生存解析（Morphのみ）
+uv run python -m dlbcl.main survival-analysis --dataset morph [--cluster-based]
+
+# その他
+uv run python -m dlbcl.main comprehensive-heatmap --dataset [morph|patho2]
+uv run python -m dlbcl.main pathology-analysis --dataset [morph|patho2]
 ```
+
+## 今後の展開
+
+1. **特徴量解析の詳細化**: 個別特徴量の詳細解析
+2. **パッチレベル解析**: WSI代表性の検証
+3. **多変量解析**: Cox回帰等の高度統計手法
