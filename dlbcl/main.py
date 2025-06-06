@@ -40,60 +40,8 @@ warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_f
 
 
 class CLI(BaseMLCLI):
-    class CommonArgs(BaseMLArgs):
-        # This includes `--seed` param
-        device: str = 'cuda'
-        dataset: str = param('morph', choices=['morph', 'patho2'])
-
-    def pre_common(self, a:CommonArgs):
-        # データセットディレクトリ設定
-        if a.dataset == 'morph':
-            self.dataset_dir = Path('./data/DLBCL-Morph/')
-        elif a.dataset == 'patho2':
-            self.dataset_dir = Path('./data/DLBCL-Patho2/')
-        else:
-            raise ValueError('Invalid dataset', a.dataset)
-
-        # 統計解析・特徴量解析で使用する共通データの読み込み
-        self._load_common_data(a.dataset)
-
-    def _load_common_data(self, dataset: str):
-        """共通データの読み込み"""
-        try:
-            # 臨床データ読み込み
-            if dataset == 'patho2':
-                self.clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_extracted_from_findings.csv')
-            else:
-                self.clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned.csv')
-            print(f"Clinical data loaded: {len(self.clinical_data)} patients")
-
-            # 特徴量データ読み込み
-            with h5py.File(f'data/DLBCL-{dataset.capitalize()}/slide_features.h5', 'r') as f:
-                self.features = f['features'][:]
-                self.feature_names = f['names'][:]
-
-            # patient_IDの抽出
-            self.patient_ids = [name.decode().split('_')[0] for name in self.feature_names]
-
-            # 特徴量データフレーム作成
-            self.feature_df = pd.DataFrame(self.features, columns=[f'feature_{i}' for i in range(self.features.shape[1])])
-            self.feature_df['patient_id'] = self.patient_ids
-
-            # 臨床データの patient_id を文字列に変換
-            self.clinical_data['patient_id'] = self.clinical_data['patient_id'].astype(str)
-
-            # データマージ
-            self.merged_data = self.feature_df.merge(self.clinical_data, on='patient_id', how='inner')
-            print(f"Merged data: {len(self.merged_data)} samples")
-
-            # CD10のバイナリ化（0 or 1のみ）
-            if 'CD10 IHC' in self.merged_data.columns:
-                self.merged_data['CD10_binary'] = (self.merged_data['CD10 IHC'] > 0).astype(int)
-
-        except Exception as e:
-            print(f"Warning: Failed to load common data: {e}")
-            # 一部のコマンド（既存のクラスタリングなど）では共通データが不要な場合があるため、
-            # エラーは警告に留めて処理を続行
+    class CommonArgs(BaseMLCLI.CommonArgs):
+        pass
 
     def run_gather_slide_features(self, a):
         data = []
