@@ -46,6 +46,7 @@ dependencies = [
     "umap-learn==0.5.7",
     "zarr<3",
     "statsmodels>=0.14.4",
+    "lifelines>=0.30.0",
 ]
 
 [tool.uv.sources]

@@ -32,6 +32,8 @@ from gigapath import slide_encoder
 import statsmodels.api as sm
 from statsmodels.stats.multitest import multipletests
 import matplotlib.patches as patches
+from lifelines import KaplanMeierFitter
+from lifelines.statistics import logrank_test
 
 from .utils import BaseMLCLI, BaseMLArgs
 
@@ -61,7 +63,10 @@ class CLI(BaseMLCLI):
         """共通データの読み込み"""
         try:
             # 臨床データ読み込み
-            self.clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned.csv')
+            if dataset == 'patho2':
+                self.clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned_path2.csv')
+            else:
+                self.clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned.csv')
             print(f"Clinical data loaded: {len(self.clinical_data)} patients")
             
             # 特徴量データ読み込み
@@ -176,24 +181,17 @@ class CLI(BaseMLCLI):
     class ClusterArgs(CommonArgs):
         target: str = Field('cluster', s='-T')
         noshow: bool = False
+        min_cluster_size: int = 5
 
     def run_cluster(self, a):
-        with h5py.File('./data/DLBCL-Morph/slide_features.h5', 'r') as f:
-            features = f['features'][:]
-            df = pd.DataFrame({
-                'name': [int((v.decode('utf-8'))) for v in f['names'][:]],
-                'filename': [v.decode('utf-8') for v in f['filenames'][:]],
-                'order': f['orders'][:],
-            })
-
-        df_clinical = pd.read_excel('./data/clinical_data_cleaned.xlsx', index_col=0)
-        df = pd.merge(
-            df,
-            df_clinical,
-            left_on='name',
-            right_index=True,
-            how='left'
-        )
+        # Use the pre-loaded merged data from _load_common_data
+        if not hasattr(self, 'merged_data'):
+            raise RuntimeError("Common data not loaded. Check if dataset files exist.")
+        
+        # Get features and merged data, ensuring they match
+        merged_data = self.merged_data
+        feature_cols = [col for col in merged_data.columns if col.startswith('feature_')]
+        features = merged_data[feature_cols].values
 
         print('Loaded features', features.shape)
         scaler = StandardScaler()
@@ -201,7 +199,7 @@ class CLI(BaseMLCLI):
         # scaled_features = features
 
         print('UMAP fitting...')
-        reducer = umap.UMAP(
+        reducer = UMAP(
                 n_neighbors=10,
                 min_dist=0.05,
                 n_components=2,
@@ -212,7 +210,36 @@ class CLI(BaseMLCLI):
         embedding = reducer.fit_transform(scaled_features)
         print('Loaded features', features.shape)
 
-        if a.target in [
+        # Perform actual clustering if target is 'cluster'
+        if a.target == 'cluster':
+            print(f'Performing HDBSCAN clustering...')
+            clusterer = hdbscan.HDBSCAN(min_cluster_size=a.min_cluster_size)
+            cluster_labels = clusterer.fit_predict(scaled_features)
+            
+            # Evaluate clustering
+            from sklearn.metrics import silhouette_score
+            if len(set(cluster_labels)) > 1:  # Need at least 2 clusters for silhouette score
+                try:
+                    silhouette_avg = silhouette_score(scaled_features, cluster_labels)
+                    print(f'Silhouette Score: {silhouette_avg:.3f}')
+                except:
+                    print('Could not compute silhouette score')
+            
+            n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+            n_noise = list(cluster_labels).count(-1)
+            print(f'Number of clusters: {n_clusters}')
+            print(f'Number of noise points: {n_noise}')
+            
+            # Save clustering results
+            cluster_df = merged_data.copy()
+            cluster_df['cluster'] = cluster_labels
+            os.makedirs(f'out/{a.dataset}', exist_ok=True)
+            cluster_df.to_csv(f'out/{a.dataset}/hdbscan_clustering_results.csv', index=False)
+            
+            # Visualize clusters
+            mode = 'categorical'
+            labels = cluster_labels
+        elif a.target in [
                 'HDBSCAN',
                 'CD10 IHC', 'MUM1 IHC', 'HANS', 'BCL6 FISH', 'MYC FISH', 'BCL2 FISH',
                 'ECOG PS', 'LDH', 'EN', 'Stage', 'IPI Score',
@@ -229,7 +256,11 @@ class CLI(BaseMLCLI):
         marker_size = 15
 
         if mode == 'categorical':
-            labels = df[a.target].fillna(-1)
+            if a.target == 'cluster':
+                # labels already defined from clustering
+                pass
+            else:
+                labels = merged_data[a.target].fillna(-1)
             n_labels = len(set(labels))
             cmap = plt.cm.viridis
 
@@ -239,9 +270,10 @@ class CLI(BaseMLCLI):
             for label in valid_labels:
                 mask = labels == label
                 color = cmap(norm(label))
+                target_name = 'Cluster' if a.target == 'cluster' else a.target
                 plt.scatter(
                     embedding[mask, 0], embedding[mask, 1], c=[color],
-                    s=marker_size, label=f'{a.target} {label}'
+                    s=marker_size, label=f'{target_name} {label}'
                 )
 
             if np.any(noise_mask):
@@ -251,7 +283,10 @@ class CLI(BaseMLCLI):
                 )
 
         else:
-            values = df[a.target]
+            if a.target == 'cluster':
+                # This shouldn't happen as cluster is always categorical
+                raise RuntimeError("Cluster should be categorical mode")
+            values = merged_data[a.target]
             norm = Normalize(vmin=values.min(), vmax=values.max())
             values = values.fillna(-1)
             has_value = values > 0
@@ -264,18 +299,267 @@ class CLI(BaseMLCLI):
             cbar = plt.colorbar(scatter)
             cbar.set_label(a.target)
 
-        plt.title(f'UMAP + {a.target}')
+        title = f'UMAP + {"HDBSCAN Clusters" if a.target == "cluster" else a.target}'
+        plt.title(title)
         plt.xlabel('UMAP Dimension 1')
         plt.ylabel('UMAP Dimension 2')
         # plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.legend()
         plt.tight_layout()
-        os.makedirs('out/morph', exist_ok=True)
+        os.makedirs(f'out/{a.dataset}', exist_ok=True)
         name = a.target.replace(' ', '_')
-        plt.savefig(f'out/morph/umap_{name}.png')
+        plt.savefig(f'out/{a.dataset}/umap_{name}.png')
         if not a.noshow:
             plt.show()
 
+    class IntegratedClusterArgs(CommonArgs):
+        noshow: bool = False
+        min_cluster_size: int = 5
+        
+    def run_integrated_cluster(self, a):
+        """統合クラスタリング: MorphとPatho2のデータを結合してクラスタリング"""
+        print("Loading Morph dataset...")
+        
+        # Morphデータ読み込み
+        with h5py.File('data/DLBCL-Morph/slide_features.h5', 'r') as f:
+            morph_features = f['features'][:]
+            morph_names = f['names'][:]
+        
+        morph_clinical = pd.read_csv('data/DLBCL-Morph/clinical_data_cleaned.csv')
+        morph_patient_ids = [name.decode().split('_')[0] for name in morph_names]
+        morph_df = pd.DataFrame(morph_features, columns=[f'feature_{i}' for i in range(morph_features.shape[1])])
+        morph_df['patient_id'] = morph_patient_ids
+        morph_df['dataset'] = 'Morph'
+        morph_clinical['patient_id'] = morph_clinical['patient_id'].astype(str)
+        morph_merged = morph_df.merge(morph_clinical, on='patient_id', how='inner')
+        
+        print("Loading Patho2 dataset...")
+        
+        # Patho2データ読み込み
+        with h5py.File('data/DLBCL-Patho2/slide_features.h5', 'r') as f:
+            patho2_features = f['features'][:]
+            patho2_names = f['names'][:]
+        
+        patho2_clinical = pd.read_csv('data/DLBCL-Patho2/clinical_data_cleaned_path2.csv')
+        patho2_patient_ids = [name.decode().split('_')[0] for name in patho2_names]
+        patho2_df = pd.DataFrame(patho2_features, columns=[f'feature_{i}' for i in range(patho2_features.shape[1])])
+        patho2_df['patient_id'] = patho2_patient_ids
+        patho2_df['dataset'] = 'Patho2'
+        patho2_clinical['patient_id'] = patho2_clinical['patient_id'].astype(str)
+        patho2_merged = patho2_df.merge(patho2_clinical, on='patient_id', how='inner')
+        
+        # 共通の特徴量カラムのみ結合
+        feature_cols = [col for col in morph_merged.columns if col.startswith('feature_')]
+        
+        # データセット結合
+        combined_features = np.vstack([
+            morph_merged[feature_cols].values,
+            patho2_merged[feature_cols].values
+        ])
+        
+        combined_labels = np.hstack([
+            np.zeros(len(morph_merged)),  # Morph = 0
+            np.ones(len(patho2_merged))   # Patho2 = 1
+        ])
+        
+        print(f"Combined features shape: {combined_features.shape}")
+        print(f"Morph samples: {len(morph_merged)}, Patho2 samples: {len(patho2_merged)}")
+        
+        # 特徴量正規化
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(combined_features)
+        
+        # UMAP次元削減
+        print('UMAP fitting...')
+        reducer = UMAP(
+            n_neighbors=10,
+            min_dist=0.05,
+            n_components=2,
+            metric='cosine',
+            random_state=a.seed,
+            n_jobs=1,
+        )
+        embedding = reducer.fit_transform(scaled_features)
+        
+        # HDBSCANクラスタリング
+        print('Performing HDBSCAN clustering...')
+        clusterer = hdbscan.HDBSCAN(min_cluster_size=a.min_cluster_size)
+        cluster_labels = clusterer.fit_predict(scaled_features)
+        
+        # 評価
+        from sklearn.metrics import silhouette_score
+        if len(set(cluster_labels)) > 1:
+            try:
+                silhouette_avg = silhouette_score(scaled_features, cluster_labels)
+                print(f'Silhouette Score: {silhouette_avg:.3f}')
+            except:
+                print('Could not compute silhouette score')
+        
+        n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
+        n_noise = list(cluster_labels).count(-1)
+        print(f'Number of clusters: {n_clusters}')
+        print(f'Number of noise points: {n_noise}')
+        
+        # 結果保存
+        combined_df = pd.concat([morph_merged, patho2_merged], ignore_index=True)
+        combined_df['cluster'] = cluster_labels
+        os.makedirs('out/integrated', exist_ok=True)
+        combined_df.to_csv('out/integrated/integrated_clustering_results.csv', index=False)
+        
+        # 可視化
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # データセット別の色分け
+        colors_dataset = ['blue', 'red']
+        dataset_names = ['Morph', 'Patho2']
+        for i, (color, dataset_name) in enumerate(zip(colors_dataset, dataset_names)):
+            mask = combined_labels == i
+            axes[0].scatter(embedding[mask, 0], embedding[mask, 1], 
+                          c=color, s=15, alpha=0.7, label=dataset_name)
+        axes[0].set_title('UMAP: Dataset Distribution')
+        axes[0].set_xlabel('UMAP Dimension 1')
+        axes[0].set_ylabel('UMAP Dimension 2')
+        axes[0].legend()
+        
+        # クラスター別の色分け
+        unique_clusters = sorted(set(cluster_labels))
+        cmap = plt.cm.viridis
+        for cluster_id in unique_clusters:
+            mask = cluster_labels == cluster_id
+            if cluster_id == -1:
+                axes[1].scatter(embedding[mask, 0], embedding[mask, 1], 
+                              c='gray', s=15, marker='x', alpha=0.7, label='Noise')
+            else:
+                color = cmap(cluster_id / max(1, max(unique_clusters)))
+                axes[1].scatter(embedding[mask, 0], embedding[mask, 1], 
+                              c=[color], s=15, alpha=0.7, label=f'Cluster {cluster_id}')
+        axes[1].set_title('UMAP: HDBSCAN Clusters')
+        axes[1].set_xlabel('UMAP Dimension 1')
+        axes[1].set_ylabel('UMAP Dimension 2')
+        axes[1].legend()
+        
+        plt.tight_layout()
+        plt.savefig('out/integrated/integrated_clustering.png', dpi=300, bbox_inches='tight')
+        if not a.noshow:
+            plt.show()
+        
+        # データセット別クラスター分析
+        print("\n=== Dataset vs Cluster Analysis ===")
+        cluster_dataset_table = pd.crosstab(combined_df['dataset'], combined_df['cluster'], margins=True)
+        print(cluster_dataset_table)
+        
+        return combined_df
+
+    class SurvivalAnalysisArgs(CommonArgs):
+        noshow: bool = False
+        survival_type: str = Field('both', choices=['OS', 'PFS', 'both'])
+        cluster_based: bool = False
+        
+    def run_survival_analysis(self, a):
+        """Kaplan-Meier survival analysis for Morph dataset"""
+        if a.dataset != 'morph':
+            raise ValueError("Survival analysis only available for Morph dataset")
+        
+        data = self.merged_data.copy()
+        
+        # Prepare survival data
+        data['OS_event'] = data['Follow-up Status']
+        data['PFS_event'] = data['Follow-up Status']
+        
+        print(f"Survival analysis for {len(data)} patients")
+        print(f"Events (deaths): {data['OS_event'].sum()}")
+        
+        # Create output directory
+        os.makedirs(f'out/{a.dataset}/survival', exist_ok=True)
+        
+        survival_types = ['OS', 'PFS'] if a.survival_type == 'both' else [a.survival_type]
+        
+        for surv_type in survival_types:
+            time_col = surv_type
+            event_col = f'{surv_type}_event'
+            
+            print(f"\n=== {surv_type} Analysis ===")
+            
+            # Overall survival curve
+            kmf = KaplanMeierFitter()
+            valid_data = data.dropna(subset=[time_col, event_col])
+            kmf.fit(valid_data[time_col], valid_data[event_col], label='All patients')
+            
+            plt.figure(figsize=(10, 6))
+            kmf.plot_survival_function()
+            plt.title(f'{surv_type} - All Patients')
+            plt.xlabel('Time (months)')
+            plt.ylabel(f'{surv_type} Probability')
+            plt.grid(True, alpha=0.3)
+            plt.savefig(f'out/{a.dataset}/survival/{surv_type}_overall.png', dpi=300, bbox_inches='tight')
+            if not a.noshow:
+                plt.show()
+            plt.close()
+            
+            print(f"Median {surv_type}: {kmf.median_survival_time_:.2f} months")
+            
+            # Age-based analysis
+            if 'Age' in data.columns:
+                data['Age_high'] = (data['Age'] > data['Age'].median()).astype(int)
+                self._plot_survival_by_group(data, time_col, event_col, 'Age_high', 
+                                           f'{surv_type}_Age', a, ['Age low', 'Age high'])
+            
+            # HANS analysis
+            if 'HANS' in data.columns:
+                self._plot_survival_by_group(data, time_col, event_col, 'HANS', 
+                                           f'{surv_type}_HANS', a)
+    
+    def _plot_survival_by_group(self, data, time_col, event_col, group_var, title, a, labels=None):
+        """Simple survival plot by grouping variable"""
+        plot_data = data.dropna(subset=[time_col, event_col, group_var])
+        groups = sorted([g for g in plot_data[group_var].unique() if pd.notna(g)])
+        
+        if len(groups) < 2:
+            return
+        
+        plt.figure(figsize=(10, 6))
+        group_data = {}
+        
+        for i, group in enumerate(groups):
+            subset = plot_data[plot_data[group_var] == group]
+            if len(subset) < 5:
+                continue
+                
+            kmf = KaplanMeierFitter()
+            durations = subset[time_col]
+            events = subset[event_col]
+            
+            label = labels[i] if labels and i < len(labels) else f'{group_var} {group}'
+            kmf.fit(durations, events, label=label)
+            kmf.plot_survival_function()
+            
+            group_data[group] = (durations, events)
+            print(f"{label}: n={len(subset)}, median={kmf.median_survival_time_:.2f} months")
+        
+        # Log-rank test for 2 groups
+        if len(group_data) == 2:
+            groups_list = list(group_data.keys())
+            durations_A, events_A = group_data[groups_list[0]]
+            durations_B, events_B = group_data[groups_list[1]]
+            
+            results = logrank_test(durations_A, durations_B, events_A, events_B)
+            p_value = results.p_value
+            
+            plt.text(0.05, 0.05, f'Log-rank p = {p_value:.4f}', 
+                    transform=plt.gca().transAxes, 
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            print(f"Log-rank test p-value: {p_value:.4f}")
+        
+        plt.title(title.replace('_', ' '))
+        plt.xlabel('Time (months)')
+        plt.ylabel('Survival Probability')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(f'out/{a.dataset}/survival/{title}.png', dpi=300, bbox_inches='tight')
+        if not a.noshow:
+            plt.show()
+        plt.close()
 
     class GlobalClusterArgs(CommonArgs):
         noshow: bool = False
@@ -319,7 +603,7 @@ class CLI(BaseMLCLI):
         scaled_features = scaler.fit_transform(features)
 
         print('UMAP fitting...')
-        reducer = umap.UMAP(
+        reducer = UMAP(
                 # n_neighbors=80,
                 # min_dist=0.3,
                 n_components=2,
