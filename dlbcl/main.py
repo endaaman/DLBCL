@@ -25,6 +25,8 @@ from scipy.cluster.hierarchy import dendrogram, linkage, leaves_list
 from scipy.spatial.distance import pdist
 from pydantic_autocli import param, AutoCLI
 import hdbscan
+import igraph as ig
+import leidenalg
 import torch
 import timm
 from umap import UMAP
@@ -181,7 +183,9 @@ class CLI(BaseMLCLI):
     class ClusterArgs(CommonArgs):
         target: str = Field('cluster', s='-T')
         noshow: bool = False
+        algorithm: str = param('leiden', choices=['hdbscan', 'leiden'])
         min_cluster_size: int = 5
+        resolution: float = 0.5  # For Leiden clustering
 
     def run_cluster(self, a):
         # Use the pre-loaded merged data from _load_common_data
@@ -212,9 +216,35 @@ class CLI(BaseMLCLI):
 
         # Perform actual clustering if target is 'cluster'
         if a.target == 'cluster':
-            print(f'Performing HDBSCAN clustering...')
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=a.min_cluster_size)
-            cluster_labels = clusterer.fit_predict(scaled_features)
+            print(f'Performing {a.algorithm.upper()} clustering...')
+            
+            if a.algorithm == 'hdbscan':
+                clusterer = hdbscan.HDBSCAN(min_cluster_size=a.min_cluster_size)
+                cluster_labels = clusterer.fit_predict(scaled_features)
+                
+            elif a.algorithm == 'leiden':
+                # Build k-nearest neighbor graph
+                from sklearn.neighbors import kneighbors_graph
+                k = min(15, len(scaled_features) - 1)  # Ensure k < n_samples
+                print(f'Building k-NN graph with k={k}...')
+                
+                # Create adjacency matrix
+                adj_matrix = kneighbors_graph(scaled_features, n_neighbors=k, mode='connectivity')
+                
+                # Convert to igraph
+                sources, targets = adj_matrix.nonzero()
+                edges = list(zip(sources.tolist(), targets.tolist()))
+                g = ig.Graph(edges=edges, directed=False)
+                g.simplify()  # Remove multiple edges and self-loops
+                
+                # Leiden clustering
+                print(f'Running Leiden clustering with resolution={a.resolution}...')
+                partition = leidenalg.find_partition(g, leidenalg.RBConfigurationVertexPartition, 
+                                                   resolution_parameter=a.resolution)
+                cluster_labels = np.array(partition.membership)
+                
+            else:
+                raise ValueError(f"Unknown algorithm: {a.algorithm}")
             
             # Evaluate clustering
             from sklearn.metrics import silhouette_score
@@ -234,7 +264,7 @@ class CLI(BaseMLCLI):
             cluster_df = merged_data.copy()
             cluster_df['cluster'] = cluster_labels
             os.makedirs(f'out/{a.dataset}', exist_ok=True)
-            cluster_df.to_csv(f'out/{a.dataset}/hdbscan_clustering_results.csv', index=False)
+            cluster_df.to_csv(f'out/{a.dataset}/{a.algorithm}_clustering_results.csv', index=False)
             
             # Visualize clusters
             mode = 'categorical'

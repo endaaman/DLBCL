@@ -47,6 +47,7 @@ dependencies = [
     "zarr<3",
     "statsmodels>=0.14.4",
     "lifelines>=0.30.0",
+    "igraph>=0.11.8",
 ]
 
 [tool.uv.sources]
