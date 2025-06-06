@@ -1,0 +1,72 @@
+# DLBCL Project Implementation Rules
+
+## 言語・コミュニケーション
+- **日本語で会話・やり取りを行う**
+- コメントやドキュメント文字列も日本語で記述
+- 変数名・関数名は英語でも可
+
+## Python実行 - 絶対厳守
+- **絶対に直接Pythonコマンドを実行してはならない**
+- **必ず `uv run` を経由してPythonスクリプト・コマンドを実行する**
+- 例: `uv run python script.py` (NOT `python script.py`)
+- 例: `uv run python -m dlbcl.main command` (NOT `python -m dlbcl.main command`)
+- **この規則を破ることは許可されない**
+
+## 実験・検証の方針
+- **段階的アプローチ**: 小さなステップから始めて慎重に検証を重ねる
+- **再現性の確保**: 全ての実験でseed値を設定し、結果の再現性を保つ
+- **統計的妥当性**: 適切な統計手法の選択と多重検定補正の実施
+- **結果の慎重な解釈**: 統計的有意性と生物学的意義を区別して考察
+- **比較検証**: 複数の手法で同様の解析を行い、結果の頑健性を確認
+- **段階的実装**: 新しい手法は既存手法との比較から開始
+
+## pydantic-autocli フレームワーク使用法
+
+### コマンド実装の基本構造
+```python
+class CLI(AutoCLI):
+    class CommonArgs(BaseMLArgs):
+        # 共通引数の定義
+        dataset: str = param('morph', choices=['morph', 'patho2'])
+    
+    class SpecificCommandArgs(CommonArgs):
+        # コマンド固有の引数
+        param_name: type = param(default_value, description="説明")
+    
+    def run_command_name(self, a: SpecificCommandArgs):
+        """コマンドの実装"""
+        pass
+```
+
+### 引数定義規則
+- 型ヒントを必ず使用: `param_name: int = param(...)`
+- `param()` 関数でCLIオプションを定義
+- 必須パラメータ: `param(..., description="説明")`
+- オプショナル: `param(default_value, description="説明")`
+- 選択肢: `param(default, choices=['choice1', 'choice2'])`
+
+### コマンド命名規則
+- メソッド名: `run_command_name` → CLIコマンド: `command-name`
+- 引数クラス名: `CommandNameArgs` (自動解決)
+- または型アノテーション: `def run_command(self, a: CustomArgs)`
+
+### 実行例
+```bash
+uv run python -m dlbcl.main command-name --param-name value
+uv run python -m dlbcl.main statistical-analysis --dataset morph --alpha 0.01
+```
+
+## データアクセス
+- h5pyでHDF5ファイル読み込み
+- slide features: `gigapath/slide_feature` (768次元)
+- patch features: `gigapath/features` (N_patches × 1536次元)
+
+## 型ヒント・品質
+- 全ての関数パラメータに型ヒントを使用
+- docstringは日本語で記述
+- 関数・クラスの説明を日本語で記述
+
+## Documentation
+- Implementation rules go in .cursorrules
+- Domain knowledge and experimental design go in docs/
+- Always update relevant documentation when adding new features 
