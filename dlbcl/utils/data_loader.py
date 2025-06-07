@@ -9,7 +9,7 @@ def load_common_data(dataset: str):
     try:
         # 臨床データ読み込み
         if dataset == 'patho2':
-            clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_extracted_from_findings.csv')
+            clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned_path2.csv')
         else:
             clinical_data = pd.read_csv(f'data/DLBCL-{dataset.capitalize()}/clinical_data_cleaned.csv')
         print(f"Clinical data loaded: {len(clinical_data)} patients")

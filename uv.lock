@@ -31,6 +31,24 @@ wheels = [
 ]
 
 [[package]]
+name = "anndata"
+version = "0.11.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "array-api-compat" },
+    { name = "h5py" },
+    { name = "natsort" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fd/1b/917c82b44cffc3157e74618fda92a61e9353c3d45a21bbffce90df337bef/anndata-0.11.3.tar.gz", hash = "sha256:986e626b62108e8db7034db2f391fd160c11d4b4e3af9c31183c82862297f7f6", size = 538016, upload-time = "2025-01-10T20:17:54.059Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/ee/2c4ba5ddd3d5664c02e8b4faefc94c7689601a29af4735b1491eb44e12a6/anndata-0.11.3-py3-none-any.whl", hash = "sha256:2ce220c4c03b7dba31fab0540d3d64f6811bc343cd3f273d7bdeed50a5cd6367", size = 142665, upload-time = "2025-01-10T20:17:51.992Z" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -93,6 +111,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8b/95/143cd64feb24a15fa4b189a3e1e7efbaeeb00f39a51e99b26fc62fbacabd/argon2_cffi_bindings-21.2.0-cp36-abi3-win32.whl", hash = "sha256:603ca0aba86b1349b147cab91ae970c63118a0f30444d4bc80355937c950c082", size = 27698, upload-time = "2021-12-01T09:09:27.87Z" },
     { url = "https://files.pythonhosted.org/packages/37/2c/e34e47c7dee97ba6f01a6203e0383e15b60fb85d78ac9a15cd066f6fe28b/argon2_cffi_bindings-21.2.0-cp36-abi3-win_amd64.whl", hash = "sha256:b2ef1c30440dbbcba7a5dc3e319408b59676e2e039e2ae11a8775ecf482b192f", size = 30817, upload-time = "2021-12-01T09:09:30.267Z" },
     { url = "https://files.pythonhosted.org/packages/5a/e4/bf8034d25edaa495da3c8a3405627d2e35758e44ff6eaa7948092646fdcc/argon2_cffi_bindings-21.2.0-cp38-abi3-macosx_10_9_universal2.whl", hash = "sha256:e415e3f62c8d124ee16018e491a009937f8cf7ebf5eb430ffc5de21b900dad93", size = 53104, upload-time = "2021-12-01T09:09:31.335Z" },
+]
+
+[[package]]
+name = "array-api-compat"
+version = "1.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/bd/9fa5c7c5621698d5632cc852a79fbbdc28024462c9396698e5fdcb395f37/array_api_compat-1.12.0.tar.gz", hash = "sha256:585bc615f650de53ac24b7c012baecfcdd810f50df3573be47e6dd9fa20df974", size = 99883, upload-time = "2025-05-16T08:49:59.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/b1/0542e0cab6f49f151a2d7a42400f84f706fc0b64e85dc1f56708b2e9fd37/array_api_compat-1.12.0-py3-none-any.whl", hash = "sha256:a0b4795b6944a9507fde54679f9350e2ad2b1e2acf4a2408a098cdc27f890a8b", size = 58156, upload-time = "2025-05-16T08:49:58.129Z" },
 ]
 
 [[package]]
@@ -395,6 +422,7 @@ dependencies = [
     { name = "pyqt6" },
     { name = "python-igraph" },
     { name = "rich" },
+    { name = "scanpy" },
     { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "statsmodels" },
@@ -454,6 +482,7 @@ requires-dist = [
     { name = "pyqt6", specifier = ">=6.8.1" },
     { name = "python-igraph", specifier = ">=0.11.8" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "scanpy", specifier = ">=1.11.2" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "setuptools", marker = "extra == 'build'" },
@@ -1129,6 +1158,15 @@ wheels = [
 ]
 
 [[package]]
+name = "legacy-api-wrap"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/07/fbc3cf8cf3759c5f234af9d94761f09f41e6d0aa912b2a9dfda19a48855a/legacy_api_wrap-1.4.1.tar.gz", hash = "sha256:9c40d67aa8312fec8763e87cbf28fea4b67710c79ca7a18137b573d150f3b2b4", size = 11003, upload-time = "2024-11-22T13:40:06.911Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/1d/9324c70629dfe4395f9122ab331cf245d3cce6ded851aa8a0a8ae264c4e6/legacy_api_wrap-1.4.1-py3-none-any.whl", hash = "sha256:8ba214242e836cebfd3b64c1a1653fce955abb0f9e4c7dffb51f2ad014def0eb", size = 9986, upload-time = "2024-11-22T13:40:05.265Z" },
+]
+
+[[package]]
 name = "leidenalg"
 version = "0.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1284,6 +1322,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/32/fc/7b9a3689911662be59889b1b0b40e17d5dba6f98080994d86ca1f3154d41/narwhals-1.41.0.tar.gz", hash = "sha256:0ab2e5a1757a19b071e37ca74b53b0b5426789321d68939738337dfddea629b5", size = 488446, upload-time = "2025-05-26T12:46:07.43Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c9/e0/ade8619846645461c012498f02b93a659e50f07d9d9a6ffefdf5ea2c02a0/narwhals-1.41.0-py3-none-any.whl", hash = "sha256:d958336b40952e4c4b7aeef259a7074851da0800cf902186a58f2faeff97be02", size = 357968, upload-time = "2025-05-26T12:46:05.207Z" },
+]
+
+[[package]]
+name = "natsort"
+version = "8.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/a9/a0c57aee75f77794adaf35322f8b6404cbd0f89ad45c87197a937764b7d0/natsort-8.4.0.tar.gz", hash = "sha256:45312c4a0e5507593da193dedd04abb1469253b601ecaf63445ad80f0a1ea581", size = 76575, upload-time = "2023-06-20T04:17:19.925Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/82/7a9d0550484a62c6da82858ee9419f3dd1ccc9aa1c26a1e43da3ecd20b0d/natsort-8.4.0-py3-none-any.whl", hash = "sha256:4732914fb471f56b5cce04d7bae6f164a592c7712e1c85f9ef585e197299521c", size = 38268, upload-time = "2023-06-20T04:17:17.522Z" },
 ]
 
 [[package]]
@@ -2148,6 +2195,38 @@ wheels = [
 ]
 
 [[package]]
+name = "scanpy"
+version = "1.11.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anndata" },
+    { name = "h5py" },
+    { name = "joblib" },
+    { name = "legacy-api-wrap" },
+    { name = "matplotlib" },
+    { name = "natsort" },
+    { name = "networkx" },
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "patsy" },
+    { name = "pynndescent" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "session-info2" },
+    { name = "statsmodels" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
+    { name = "umap-learn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/a9/4f619c500e75267897d5d65ee8c864355a1693d22da03af09d90f43dc717/scanpy-1.11.2.tar.gz", hash = "sha256:cde3a142aa12bd3a6894756d50c245cd6ec7776bba4b244c5099b0666f7455bd", size = 14087080, upload-time = "2025-05-28T12:41:21.216Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/7b/f58f238bc3062aa7cd17a1c26bbe539233c3776bd6acd819545c269731ad/scanpy-1.11.2-py3-none-any.whl", hash = "sha256:a97d5b74c1ae2d60caf504fd530a83f2e61e46d889f8d19f797a2bbc2d64dff3", size = 2100108, upload-time = "2025-05-28T12:41:19.267Z" },
+]
+
+[[package]]
 name = "scikit-learn"
 version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2207,6 +2286,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fd/3a/aec9b02217bb79b87bbc1a21bc6abc51e3d5dcf65c30487ac96c0908c722/Send2Trash-1.8.3.tar.gz", hash = "sha256:b18e7a3966d99871aefeb00cfbcfdced55ce4871194810fc71f4aa484b953abf", size = 17394, upload-time = "2024-04-07T00:01:09.267Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/b0/4562db6223154aa4e22f939003cb92514c79f3d4dccca3444253fd17f902/Send2Trash-1.8.3-py3-none-any.whl", hash = "sha256:0c31227e0bd08961c7665474a3d1ef7193929fedda4233843689baa056be46c9", size = 18072, upload-time = "2024-04-07T00:01:07.438Z" },
+]
+
+[[package]]
+name = "session-info2"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/68/b38d41c69044fdd2b73595fdbc854c5e3df964f26adf1fbd5c041bea30c9/session_info2-0.1.2.tar.gz", hash = "sha256:bdb75885128333611e0cf4357f31a0b5869bcb7889b93251ed8571aa4e4ad0b6", size = 22037, upload-time = "2024-12-17T12:27:47.635Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/98/9578ce1d8ae951cf44e6b7434854824f0eae12d54b270e80014f8ab1971c/session_info2-0.1.2-py3-none-any.whl", hash = "sha256:8f5c010b621930556eee640f6a71d76f0c746ed1194b27ad227e6fe6e61883d4", size = 14716, upload-time = "2024-12-17T12:27:46.367Z" },
 ]
 
 [[package]]

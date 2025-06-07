@@ -5,7 +5,10 @@
       "Bash(find:*)",
       "Bash(mv:*)",
       "Bash(python:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(uv add:*)",
+      "Bash(rg:*)"
     ],
     "deny": []
   }

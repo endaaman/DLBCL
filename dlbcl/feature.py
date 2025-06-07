@@ -45,7 +45,12 @@ class CLI(BaseMLCLI):
         print(f"使用データ: {len(merged_data)} サンプル")
 
         # 臨床変数定義
-        clinical_vars = ['PFS', 'OS', 'LDH', 'Age', 'Stage', 'CD10_binary', 'HANS']
+        clinical_vars = [
+            'PFS', 'OS', 'LDH', 'Age', 'Stage', 'CD10_binary', 'HANS',
+            'MYC IHC', 'BCL2 IHC', 'BCL6 IHC', 'CD10 IHC', 'MUM1 IHC',
+            'BCL2 FISH', 'BCL6 FISH', 'MYC FISH',
+            'ECOG PS', 'EN', 'IPI Score', 'Follow-up Status'
+        ]
         available_clinical = [var for var in clinical_vars if var in merged_data.columns]
         feature_cols = [col for col in merged_data.columns if col.startswith('feature_')]
 
