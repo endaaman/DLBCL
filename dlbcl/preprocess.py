@@ -104,14 +104,15 @@ class CLI(BaseMLCLI):
         n_neighbors: int = param(15, description="Number of neighbors for UMAP")
         min_dist: float = param(0.1, description="Minimum distance for UMAP")
         save_clusters: bool = param(True, description="Save cluster results to CSV")
+        feature: bool = param('slide', choices=['slide', 'center', 'medoid'])
         noshow: bool = False
 
     def run_leiden(self, a: LeidenArgs):
         """Leiden clustering (pure clustering without visualization)"""
 
         # Load features
-        with h5py.File(str(self.dataset_dir / 'slide_features.h5'), 'r') as f:
-            features = f['features'][:]
+        with h5py.File(str(self.dataset_dir / 'global_features.h5'), 'r') as f:
+            features = f[f'gigapath/{a.feature}_features'][:]
             names = f['names'][:]
             orders = f['orders'][:]
 
