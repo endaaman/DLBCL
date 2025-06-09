@@ -46,9 +46,11 @@ class CLI(BaseMLCLI):
     class CommonArgs(BaseMLCLI.CommonArgs):
         pass
 
-    def run_gather_slide_features(self, a):
+    def run_gather_features(self, a):
         data = []
-        features = []
+        slide_features = []
+        center_features = []
+        medoid_features = []
         dirs = sorted(glob(str(self.dataset_dir / 'dataset/*')))
         assert len(dirs) > 0
         for dir in tqdm(dirs):
@@ -64,9 +66,17 @@ class CLI(BaseMLCLI):
                 if not m:
                     print('skip', h5_path)
                     continue
-                print('loading', h5_path)
                 with h5py.File(h5_path, 'r') as f:
-                    features.append(f['gigapath/slide_feature'][:])
+                    slide_features.append(f['gigapath/slide_feature'][:])
+                    for m in ['gigapath', 'uni']:
+                        features = f[f'{m}/features'][:]
+                        # 中心
+                        center_feature = np.mean(features, axis=0)
+                        # 中心近傍
+                        medoid_feature = np.argmin(np.linalg.norm(features - center_feature, axis=1))
+                        center_features.append(center_feature)
+                        medoid_features.append(medoid_feature)
+
                 data.append({
                     'name': name,
                     'order': i,
@@ -74,12 +84,16 @@ class CLI(BaseMLCLI):
                 })
 
         df = pd.DataFrame(data)
-        features = np.array(features)
-        print('features', features.shape)
+        slide_features = np.array(slide_features)
+        center_features = np.array(center_features)
+        medoid_features = np.array(medoid_features)
+        print('slide_features', slide_features.shape)
 
-        o = str(self.dataset_dir / 'slide_features.h5')
+        o = str(self.dataset_dir / 'global_features.h5')
         with h5py.File(o, 'w') as f:
-            f.create_dataset('features', data=features)
+            f.create_dataset('slide_features', data=slide_features)
+            f.create_dataset('center_features', data=center_feature)
+            f.create_dataset('medoid_features', data=medoid_feature)
             f.create_dataset('names', data=df['name'].values)
             f.create_dataset('orders', data=df['order'].values)
             f.create_dataset('filenames', data=df['filename'].values)
