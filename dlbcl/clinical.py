@@ -53,7 +53,7 @@ class CLI(BaseMLCLI):
 
         # 免疫染色マーカー（連続値）- 両データセットで同じ列名
         ihc_markers = ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC']
-        
+
         print(f"IHCマーカー候補: {ihc_markers}")
         available_ihc = [var for var in ihc_markers if var in clinical_data.columns]
         print(f"利用可能なIHCマーカー: {available_ihc}")
@@ -66,9 +66,9 @@ class CLI(BaseMLCLI):
         numeric_vars.extend([var for var in other_numeric if var in clinical_data.columns])
 
         # カテゴリカル変数 - 共通変数を優先
-        categorical_candidates = ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)', 
+        categorical_candidates = ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)',
                                 'Follow-up Status', 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH', 'EBV']
-        
+
         print(f"カテゴリカル変数候補: {categorical_candidates}")
         available_categorical = [var for var in categorical_candidates if var in clinical_data.columns]
         print(f"利用可能なカテゴリカル変数: {available_categorical}")
@@ -387,20 +387,20 @@ class CLI(BaseMLCLI):
         """相関行列のヒートマップ作成"""
 
         plt.figure(figsize=(10, 8))
-        
+
         # マスクを作成（NaN値用）
         mask = np.isnan(matrix)
-        
+
         # ヒートマップ作成
         sns.heatmap(matrix, annot=True, fmt='.3f', cmap='RdBu_r', center=0,
                    xticklabels=variables, yticklabels=variables,
                    mask=mask, square=True, cbar_kws={'label': f'{a.correlation_method.capitalize()} Correlation'})
-        
+
         plt.title(f'Clinical Variables Correlation Matrix\n({a.dataset.upper()}, {a.correlation_method})')
         plt.xticks(rotation=45, ha='right')
         plt.yticks(rotation=0)
         plt.tight_layout()
-        
+
         plt.savefig(output_dir / f'{prefix}_correlation_heatmap.png', dpi=300, bbox_inches='tight')
         plt.savefig(output_dir / f'{prefix}_correlation_heatmap.pdf', bbox_inches='tight')
         plt.close()
