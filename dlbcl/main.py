@@ -714,10 +714,10 @@ class CLI(BaseMLCLI):
 
         # Map morph IHC names to patho2 names
         feature_mapping = {
-            'CD10 IHC': 'CD10',
-            'MUM1 IHC': 'MUM1',
-            'BCL2 IHC': 'BCL2',
-            'BCL6 IHC': 'BCL6',
+            'CD10 IHC': 'CD10 IHC',
+            'MUM1 IHC': 'MUM1 IHC',
+            'BCL2 IHC': 'BCL2 IHC',
+            'BCL6 IHC': 'BCL6 IHC',
             'HANS': 'HANS'
         }
 
@@ -1168,6 +1168,316 @@ class CLI(BaseMLCLI):
                     f.write(f"  Number of comparisons: {len(p_values)}\n")
 
             print(f"  Summary: {summary_file}")
+
+    class CompareCorrelationArgs(CommonArgs):
+        output_dir: str = param('', description="Output directory (defaults to out/compare_correlation)")
+        correlation_method: str = param('pearson', choices=['pearson', 'spearman'], description="Correlation method to use")
+        figsize_width: int = param(24, description="Figure width in inches")
+        figsize_height: int = param(12, description="Figure height in inches")
+
+    def run_compare_correlation(self, a: CompareCorrelationArgs):
+        """Compare correlation heatmaps between Morph and Patho2 datasets with unified feature ordering"""
+        
+        if not a.output_dir:
+            a.output_dir = 'out/compare_correlation'
+        
+        os.makedirs(a.output_dir, exist_ok=True)
+        
+        print("Loading correlation matrices from both datasets...")
+        
+        # Load correlation matrices from both datasets
+        morph_corr_file = "out/morph/comprehensive_heatmap/correlation_matrix.csv"
+        patho2_corr_file = "out/patho2/comprehensive_heatmap/correlation_matrix.csv"
+        
+        if not (os.path.exists(morph_corr_file) and os.path.exists(patho2_corr_file)):
+            raise FileNotFoundError("Please run comprehensive-heatmap for both datasets first")
+        
+        morph_corr = pd.read_csv(morph_corr_file, index_col=0)
+        patho2_corr = pd.read_csv(patho2_corr_file, index_col=0)
+        
+        print(f"Morph correlation matrix: {morph_corr.shape}")
+        print(f"Patho2 correlation matrix: {patho2_corr.shape}")
+        
+        # Create comprehensive variable list combining both datasets
+        all_variables = []
+        
+        # Check which naming convention Patho2 uses in the correlation matrix
+        patho2_columns = list(patho2_corr.columns)
+        print(f"Patho2 columns in correlation matrix: {patho2_columns}")
+        
+        # Determine mapping based on actual column names
+        if 'CD10 IHC' in patho2_columns:
+            # New naming convention
+            common_mapping = {
+                'CD10 IHC': 'CD10 IHC',
+                'MUM1 IHC': 'MUM1 IHC', 
+                'BCL2 IHC': 'BCL2 IHC',
+                'BCL6 IHC': 'BCL6 IHC',
+                'MYC IHC': 'MYC IHC',
+                'HANS': 'HANS'
+            }
+        else:
+            # Old naming convention (short names)
+            common_mapping = {
+                'CD10 IHC': 'CD10',
+                'MUM1 IHC': 'MUM1', 
+                'BCL2 IHC': 'BCL2',
+                'BCL6 IHC': 'BCL6',
+                'MYC IHC': 'MYC',
+                'HANS': 'HANS'
+            }
+        
+        # Add common variables
+        for morph_var, patho2_var in common_mapping.items():
+            if morph_var in morph_corr.columns and patho2_var in patho2_corr.columns:
+                all_variables.append((morph_var, patho2_var, 'common'))
+        
+        # Add Morph-only variables
+        morph_only = ['OS', 'PFS', 'Follow-up Status', 'Age', 'LDH', 'ECOG PS', 
+                     'Stage', 'IPI Score', 'IPI Risk Group (4 Class)', 'RIPI Risk Group']
+        for var in morph_only:
+            if var in morph_corr.columns:
+                all_variables.append((var, None, 'morph_only'))
+        
+        # Add Patho2-only variables
+        patho2_only = ['EBV']
+        for var in patho2_only:
+            if var in patho2_corr.columns:
+                all_variables.append((None, var, 'patho2_only'))
+        
+        print(f"Total variables to display: {len(all_variables)}")
+        for i, (m, p, t) in enumerate(all_variables):
+            print(f"  {i+1}. {m} <-> {p} ({t})")
+        
+        # Prepare data matrices
+        morph_clinical_vars = []
+        patho2_clinical_vars = []
+        variable_labels = []
+        
+        for morph_var, patho2_var, var_type in all_variables:
+            if var_type == 'common':
+                morph_clinical_vars.append(morph_var)
+                patho2_clinical_vars.append(patho2_var)
+                # Use Morph naming for display (longer, more descriptive)
+                display_name = morph_var
+                variable_labels.append(display_name)
+            elif var_type == 'morph_only':
+                morph_clinical_vars.append(morph_var)
+                patho2_clinical_vars.append(None)
+                variable_labels.append(f"{morph_var}\n(Morph only)")
+            elif var_type == 'patho2_only':
+                morph_clinical_vars.append(None)
+                patho2_clinical_vars.append(patho2_var)
+                variable_labels.append(f"{patho2_var}\n(Patho2 only)")
+        
+        print(f"Mapped clinical variables: {len(morph_clinical_vars)}")
+        print(f"Morph variables: {morph_clinical_vars}")
+        print(f"Patho2 variables: {patho2_clinical_vars}")
+        
+        if len(morph_clinical_vars) == 0:
+            raise ValueError("No mapped clinical variables found between datasets")
+        
+        # Create data matrices handling None values
+        morph_data = {}
+        patho2_data = {}
+        
+        for i, (morph_var, patho2_var) in enumerate(zip(morph_clinical_vars, patho2_clinical_vars)):
+            col_name = f"col_{i}"  # Use index as column name
+            
+            if morph_var:
+                morph_data[col_name] = morph_corr[morph_var]
+            else:
+                morph_data[col_name] = pd.Series([np.nan] * len(morph_corr), index=morph_corr.index)
+                
+            if patho2_var:
+                patho2_data[col_name] = patho2_corr[patho2_var]
+            else:
+                patho2_data[col_name] = pd.Series([np.nan] * len(patho2_corr), index=patho2_corr.index)
+        
+        morph_subset = pd.DataFrame(morph_data)
+        patho2_subset = pd.DataFrame(patho2_data)
+        
+        # Use Morph's dendrogram ordering (from comprehensive_heatmap)
+        print("Loading feature ordering from Morph dendrogram...")
+        
+        # Calculate hierarchical clustering using the same method as comprehensive_heatmap
+        from scipy.cluster.hierarchy import linkage, leaves_list
+        from scipy.spatial.distance import pdist
+        
+        # Use ONLY common variables for fair dendrogram creation
+        print("Creating dendrogram using common variables only...")
+        
+        # Extract only common variables (first 6 variables are common)
+        n_common = len([v for v in all_variables if v[2] == 'common'])
+        print(f"Using {n_common} common variables for dendrogram")
+        
+        # Use both datasets' common variables for more robust clustering
+        morph_common_only = morph_subset.iloc[:, :n_common].fillna(0)
+        patho2_common_only = patho2_subset.iloc[:, :n_common].fillna(0)
+        
+        # Average correlation patterns from both datasets for fairness
+        combined_common = (morph_common_only + patho2_common_only) / 2
+        
+        feature_distance = pdist(combined_common.values, metric='euclidean')
+        feature_linkage = linkage(feature_distance, method='ward')
+        feature_order = leaves_list(feature_linkage)
+        
+        print(f"Dendrogram created using combined patterns from {n_common} common variables")
+        
+        # Reorder both datasets using the same feature order
+        morph_ordered = morph_subset.iloc[feature_order]
+        patho2_ordered = patho2_subset.iloc[feature_order]
+        
+        # Create unified heatmap with dendrogram
+        fig = plt.figure(figsize=(a.figsize_width, a.figsize_height))
+        
+        # Grid: dendrogram | morph | patho2 | colorbar
+        gs = fig.add_gridspec(1, 4, width_ratios=[0.1, 0.4, 0.4, 0.1], 
+                             hspace=0.02, wspace=0.1)
+        
+        # Plot dendrogram
+        ax_dendro = fig.add_subplot(gs[0, 0])
+        dendro = dendrogram(feature_linkage, ax=ax_dendro, orientation='left',
+                           no_labels=True, color_threshold=0)
+        ax_dendro.set_xticks([])
+        ax_dendro.set_yticks([])
+        ax_dendro.set_title('Dendrogram', fontsize=12)
+        for spine in ax_dendro.spines.values():
+            spine.set_visible(False)
+        
+        # Morph heatmap
+        ax_morph = fig.add_subplot(gs[0, 1])
+        im1 = ax_morph.imshow(morph_ordered.values, cmap=plt.cm.RdBu_r, 
+                             aspect='auto', vmin=-1, vmax=1, interpolation='nearest')
+        ax_morph.set_title('MORPH Dataset', fontsize=14)
+        ax_morph.set_xticks(range(len(variable_labels)))
+        ax_morph.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
+        ax_morph.set_yticks(range(0, len(morph_ordered), 50))
+        ax_morph.set_yticklabels([f"F{feature_order[i]}" for i in range(0, len(morph_ordered), 50)], fontsize=8)
+        ax_morph.set_ylabel('Feature Index (Ordered by Dendrogram)')
+        
+        # Patho2 heatmap with NaN masking
+        ax_patho2 = fig.add_subplot(gs[0, 2])
+        
+        # Create masked array for NaN values
+        patho2_values = patho2_ordered.values
+        mask = np.isnan(patho2_values)
+        
+        im2 = ax_patho2.imshow(patho2_values, cmap=plt.cm.RdBu_r, 
+                              aspect='auto', vmin=-1, vmax=1, interpolation='nearest')
+        
+        # Overlay gray for missing data
+        import matplotlib.patches as patches
+        for i in range(patho2_values.shape[0]):
+            for j in range(patho2_values.shape[1]):
+                if mask[i, j]:
+                    ax_patho2.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1,
+                                                         facecolor='lightgray', edgecolor='darkgray', alpha=0.8))
+        
+        ax_patho2.set_title('PATHO2 Dataset', fontsize=14)
+        ax_patho2.set_xticks(range(len(variable_labels)))
+        ax_patho2.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
+        ax_patho2.set_yticks([])
+        
+        # Add colorbar
+        ax_colorbar = fig.add_subplot(gs[0, 3])
+        cbar = plt.colorbar(im2, cax=ax_colorbar)
+        cbar.set_label(f'{a.correlation_method.capitalize()}\nCorrelation', rotation=270, labelpad=20)
+        
+        plt.suptitle(f'Unified Feature-Clinical Correlation Comparison\n' +
+                    f'Features ordered by Morph dendrogram clustering', fontsize=16, y=0.98)
+        
+        # Adjust layout to prevent cutoff
+        plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
+        
+        # Save the unified comparison plot
+        plt.savefig(f"{a.output_dir}/unified_correlation_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{a.output_dir}/unified_correlation_comparison.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Create difference analysis
+        print("Creating correlation difference analysis...")
+        
+        # Calculate differences (align columns properly)
+        morph_aligned = morph_ordered.values
+        patho2_aligned = patho2_ordered.values
+        diff_matrix = morph_aligned - patho2_aligned
+        
+        # Create difference heatmap with dendrogram (matching the main comparison layout)
+        fig_diff = plt.figure(figsize=(16, 10))
+        
+        # Grid: dendrogram | difference heatmap | colorbar
+        gs_diff = fig_diff.add_gridspec(1, 3, width_ratios=[0.15, 0.75, 0.1], 
+                                       hspace=0.02, wspace=0.1)
+        
+        # Plot same dendrogram on left
+        ax_dendro_diff = fig_diff.add_subplot(gs_diff[0, 0])
+        dendro_diff = dendrogram(feature_linkage, ax=ax_dendro_diff, orientation='left',
+                               no_labels=True, color_threshold=0)
+        ax_dendro_diff.set_xticks([])
+        ax_dendro_diff.set_yticks([])
+        ax_dendro_diff.set_title('Dendrogram', fontsize=12)
+        for spine in ax_dendro_diff.spines.values():
+            spine.set_visible(False)
+        
+        # Difference heatmap in center
+        ax_diff = fig_diff.add_subplot(gs_diff[0, 1])
+        im_diff = ax_diff.imshow(diff_matrix, cmap=plt.cm.RdBu_r, aspect='auto', 
+                               vmin=-1, vmax=1, interpolation='nearest')
+        ax_diff.set_title('Correlation Differences (Morph - Patho2)', fontsize=14)
+        ax_diff.set_xticks(range(len(variable_labels)))
+        ax_diff.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
+        ax_diff.set_yticks(range(0, len(morph_ordered), 50))
+        ax_diff.set_yticklabels([f"F{feature_order[i]}" for i in range(0, len(morph_ordered), 50)], fontsize=8)
+        ax_diff.set_ylabel('Feature Index (Dendrogram Order)')
+        
+        # Colorbar on right
+        ax_cbar_diff = fig_diff.add_subplot(gs_diff[0, 2])
+        cbar_diff = plt.colorbar(im_diff, cax=ax_cbar_diff)
+        cbar_diff.set_label('Correlation Difference\n(Morph - Patho2)', rotation=270, labelpad=25)
+        
+        plt.suptitle(f'Correlation Differences Between Datasets\nFeatures ordered by Morph dendrogram clustering', 
+                    fontsize=16, y=0.98)
+        
+        # Adjust layout
+        plt.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.1)
+        
+        plt.savefig(f"{a.output_dir}/unified_correlation_difference.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Summary statistics
+        summary = {
+            'total_features': len(morph_ordered),
+            'mapped_clinical_vars': len(morph_clinical_vars),
+            'morph_vars': morph_clinical_vars,
+            'patho2_vars': patho2_clinical_vars,
+            'mean_abs_diff': np.nanmean(np.abs(diff_matrix)),
+            'max_abs_diff': np.nanmax(np.abs(diff_matrix)),
+            'highly_different_pairs': np.sum(np.abs(diff_matrix) > 0.3),
+            'correlation_method': a.correlation_method
+        }
+        
+        with open(f"{a.output_dir}/unified_comparison_summary.txt", 'w') as f:
+            f.write("Unified Dataset Correlation Comparison Summary\n")
+            f.write("="*50 + "\n\n")
+            f.write(f"Features: {summary['total_features']} (ordered by Morph dendrogram)\n")
+            f.write(f"Clinical variables mapped: {summary['mapped_clinical_vars']}\n\n")
+            f.write("Variable mapping:\n")
+            for i, (m, p) in enumerate(zip(morph_clinical_vars, patho2_clinical_vars)):
+                f.write(f"  {i+1}. {m} (Morph) <-> {p} (Patho2)\n")
+            f.write(f"\nCorrelation differences:\n")
+            f.write(f"  Mean absolute difference: {summary['mean_abs_diff']:.3f}\n")
+            f.write(f"  Maximum absolute difference: {summary['max_abs_diff']:.3f}\n")
+            f.write(f"  Highly different pairs (|diff| > 0.3): {summary['highly_different_pairs']}\n")
+            f.write(f"  Correlation method: {summary['correlation_method']}\n")
+        
+        print(f"Unified comparison completed! Results saved to {a.output_dir}")
+        print(f"Features analyzed: {len(morph_ordered)} (dendrogram ordered)")
+        print(f"Clinical variables mapped: {len(morph_clinical_vars)}")
+        print(f"Mean absolute correlation difference: {summary['mean_abs_diff']:.3f}")
+        
+        # Return None to avoid warning about unexpected return type
+        return None
 
 
 
