@@ -36,6 +36,7 @@ import scanpy as sc
 import anndata as ad
 
 from .utils import BaseMLCLI, BaseMLArgs
+from .utils.data_loader import load_common_data
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
@@ -1476,6 +1477,10 @@ class CLI(BaseMLCLI):
         print(f"Clinical variables mapped: {len(morph_clinical_vars)}")
         print(f"Mean absolute correlation difference: {summary['mean_abs_diff']:.3f}")
         
+        # Create concatenated unified correlation heatmap
+        print("\n=== Creating Concatenated Unified Correlation ===")
+        self._create_concatenated_correlation(common_mapping, feature_linkage, feature_order, a)
+        
         # Advanced analysis: Create feature modules from dendrogram clusters
         print("\n=== Advanced Analysis: Feature Module Creation ===")
         self._create_feature_modules(feature_linkage, feature_order, morph_ordered, patho2_ordered, 
@@ -1483,6 +1488,140 @@ class CLI(BaseMLCLI):
         
         # Return None to avoid warning about unexpected return type
         return None
+
+    def _create_concatenated_correlation(self, common_mapping, feature_linkage, feature_order, a):
+        """Create unified correlation heatmap by concatenating both datasets (common columns only)"""
+        
+        print("Loading and concatenating datasets...")
+        
+        # Load both datasets using the same approach as in _pre_common
+        morph_data_dict = load_common_data('morph')
+        if morph_data_dict is None:
+            print("Warning: Could not load morph data")
+            return
+        morph_merged = morph_data_dict['merged_data']
+        
+        patho2_data_dict = load_common_data('patho2')
+        if patho2_data_dict is None:
+            print("Warning: Could not load patho2 data")
+            return
+        patho2_merged = patho2_data_dict['merged_data']
+        
+        print(f"Morph data shape: {morph_merged.shape}")
+        print(f"Patho2 data shape: {patho2_merged.shape}")
+        
+        # Extract common columns only
+        common_clinical_cols = list(common_mapping.keys())  # Use morph naming as standard
+        feature_cols = [col for col in morph_merged.columns if col.startswith('feature_')]
+        
+        # Map patho2 column names to morph names for consistency
+        patho2_renamed = patho2_merged.copy()
+        for morph_col, patho2_col in common_mapping.items():
+            if patho2_col in patho2_merged.columns and morph_col != patho2_col:
+                patho2_renamed[morph_col] = patho2_merged[patho2_col]
+                patho2_renamed.drop(patho2_col, axis=1, inplace=True)
+        
+        # Select common columns + features for concatenation
+        common_cols = feature_cols + common_clinical_cols
+        morph_subset = morph_merged[common_cols]
+        patho2_subset = patho2_renamed[common_cols]
+        
+        # Concatenate datasets
+        concatenated_data = pd.concat([morph_subset, patho2_subset], ignore_index=True)
+        print(f"Concatenated data shape: {concatenated_data.shape}")
+        print(f"Total samples: {len(concatenated_data)} (morph: {len(morph_subset)}, patho2: {len(patho2_subset)})")
+        
+        # Compute correlation matrix for concatenated data
+        print("Computing unified correlation matrix...")
+        concat_corr_matrix = np.full((len(feature_cols), len(common_clinical_cols)), np.nan)
+        
+        for i, feature_col in enumerate(feature_cols):
+            for j, clinical_col in enumerate(common_clinical_cols):
+                feature_data = concatenated_data[feature_col]
+                clinical_data = concatenated_data[clinical_col]
+                
+                valid_mask = ~(feature_data.isna() | clinical_data.isna())
+                
+                if valid_mask.sum() >= 10:  # Minimum 10 samples for correlation
+                    feature_valid = feature_data[valid_mask]
+                    clinical_valid = clinical_data[valid_mask]
+                    
+                    try:
+                        if a.correlation_method == 'pearson':
+                            corr, _ = pearsonr(feature_valid, clinical_valid)
+                        else:
+                            corr, _ = spearmanr(feature_valid, clinical_valid)
+                        concat_corr_matrix[i, j] = corr
+                    except:
+                        pass  # Keep as NaN if correlation fails
+        
+        # Create DataFrame
+        concat_corr_df = pd.DataFrame(concat_corr_matrix,
+                                     index=feature_cols,
+                                     columns=common_clinical_cols)
+        
+        # Apply the same feature ordering from dendrogram
+        concat_ordered = concat_corr_df.iloc[feature_order]
+        
+        print("Creating concatenated correlation heatmap...")
+        
+        # Create figure with dendrogram
+        fig = plt.figure(figsize=(14, a.figsize_height))
+        
+        # Grid: dendrogram | heatmap | colorbar
+        gs = fig.add_gridspec(1, 3, width_ratios=[0.15, 0.75, 0.1], 
+                             hspace=0.02, wspace=0.1)
+        
+        # Plot dendrogram
+        ax_dendro = fig.add_subplot(gs[0, 0])
+        dendro = dendrogram(feature_linkage, ax=ax_dendro, orientation='left',
+                           no_labels=True, color_threshold=0)
+        ax_dendro.set_xticks([])
+        ax_dendro.set_yticks([])
+        ax_dendro.set_title('Dendrogram', fontsize=12)
+        for spine in ax_dendro.spines.values():
+            spine.set_visible(False)
+        
+        # Main heatmap
+        ax_heatmap = fig.add_subplot(gs[0, 1])
+        im = ax_heatmap.imshow(concat_ordered.values, cmap=plt.cm.RdBu_r,
+                              aspect='auto', vmin=-1, vmax=1, interpolation='nearest')
+        
+        # Overlay gray for missing values
+        mask = concat_ordered.isna()
+        import matplotlib.patches as patches
+        for i in range(len(concat_ordered)):
+            for j in range(len(common_clinical_cols)):
+                if mask.iloc[i, j]:
+                    ax_heatmap.add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1,
+                                                          facecolor='lightgray', edgecolor='darkgray', alpha=0.8))
+        
+        ax_heatmap.set_title(f'Concatenated Unified Correlation\n(Total: {len(concatenated_data)} samples)', fontsize=14)
+        ax_heatmap.set_xticks(range(len(common_clinical_cols)))
+        ax_heatmap.set_xticklabels(common_clinical_cols, rotation=45, ha='right', fontsize=10)
+        ax_heatmap.set_yticks(range(0, len(concat_ordered), 50))
+        ax_heatmap.set_yticklabels([f"F{feature_order[i]}" for i in range(0, len(concat_ordered), 50)], fontsize=8)
+        ax_heatmap.set_ylabel('Feature Index (Dendrogram Order)')
+        
+        # Add colorbar
+        ax_colorbar = fig.add_subplot(gs[0, 2])
+        cbar = plt.colorbar(im, cax=ax_colorbar)
+        cbar.set_label(f'{a.correlation_method.capitalize()}\nCorrelation', rotation=270, labelpad=20)
+        
+        plt.suptitle(f'Unified Feature-Clinical Correlation (Concatenated Data)\n' +
+                    f'Morph + Patho2 Combined Analysis', fontsize=16, y=0.95)
+        
+        # Save plot
+        plt.savefig(f"{a.output_dir}/unified_correlation_concatenated.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{a.output_dir}/unified_correlation_concatenated.pdf", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Save correlation matrix
+        concat_corr_df.to_csv(f"{a.output_dir}/concatenated_correlation_matrix.csv")
+        
+        print(f"Concatenated correlation analysis completed!")
+        print(f"Results saved to: {a.output_dir}/unified_correlation_concatenated.png")
+        print(f"Correlation matrix saved to: {a.output_dir}/concatenated_correlation_matrix.csv")
 
     def _create_feature_modules(self, feature_linkage, feature_order, morph_ordered, patho2_ordered, 
                                variable_labels, a):
@@ -1571,9 +1710,9 @@ class CLI(BaseMLCLI):
             print(f"Saved {module_name} module analysis to: {module_file}")
         
         # Create module-based reduced features for further analysis
-        self._create_module_features(module_analysis, morph_ordered, patho2_ordered, a)
+        self._create_module_features(module_analysis, morph_ordered, patho2_ordered, variable_labels, a)
     
-    def _create_module_features(self, module_analysis, morph_ordered, patho2_ordered, a):
+    def _create_module_features(self, module_analysis, morph_ordered, patho2_ordered, variable_labels, a):
         """Create reduced feature representation based on modules"""
         
         print("\n--- MODULE-BASED FEATURE REDUCTION ---")
@@ -1605,38 +1744,53 @@ class CLI(BaseMLCLI):
         patho2_modules_df.to_csv(f"{a.output_dir}/patho2_module_features.csv")
         
         # Create module comparison heatmap
-        self._plot_module_comparison(morph_modules_df, patho2_modules_df, a)
+        self._plot_module_comparison(morph_modules_df, patho2_modules_df, variable_labels, a)
     
-    def _plot_module_comparison(self, morph_modules_df, patho2_modules_df, a):
+    def _plot_module_comparison(self, morph_modules_df, patho2_modules_df, variable_labels, a):
         """Create comparison plot for module features"""
+        
+        # Calculate dynamic color range based on actual data
+        all_values = np.concatenate([morph_modules_df.values.flatten(), patho2_modules_df.values.flatten()])
+        valid_values = all_values[~np.isnan(all_values)]
+        vmin, vmax = np.percentile(valid_values, [5, 95])  # Use 5-95 percentile for better contrast
+        
+        # Make sure range is symmetric around 0 for better interpretation
+        abs_max = max(abs(vmin), abs(vmax))
+        vmin, vmax = -abs_max, abs_max
+        
+        print(f"Using dynamic color range: [{vmin:.3f}, {vmax:.3f}]")
         
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
         
         # Morph modules
         im1 = ax1.imshow(morph_modules_df.values, cmap=plt.cm.RdBu_r, aspect='auto', 
-                        vmin=-1, vmax=1, interpolation='nearest')
+                        vmin=vmin, vmax=vmax, interpolation='nearest')
         ax1.set_title('MORPH Module Features', fontsize=14)
-        ax1.set_xticks(range(len(morph_modules_df.columns)))
-        ax1.set_xticklabels(morph_modules_df.columns, rotation=45, ha='right', fontsize=9)
+        ax1.set_xticks(range(len(variable_labels)))
+        ax1.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
         ax1.set_yticks(range(len(morph_modules_df)))
         ax1.set_yticklabels(morph_modules_df.index, fontsize=9)
         
         # Patho2 modules
         im2 = ax2.imshow(patho2_modules_df.values, cmap=plt.cm.RdBu_r, aspect='auto',
-                        vmin=-1, vmax=1, interpolation='nearest')
+                        vmin=vmin, vmax=vmax, interpolation='nearest')
         ax2.set_title('PATHO2 Module Features', fontsize=14)
-        ax2.set_xticks(range(len(patho2_modules_df.columns)))
-        ax2.set_xticklabels(patho2_modules_df.columns, rotation=45, ha='right', fontsize=9)
+        ax2.set_xticks(range(len(variable_labels)))
+        ax2.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
         ax2.set_yticks(range(len(patho2_modules_df)))
         ax2.set_yticklabels(patho2_modules_df.index, fontsize=9)
         
         # Difference
         diff_modules = morph_modules_df.values - patho2_modules_df.values
+        diff_vmin, diff_vmax = np.nanpercentile(diff_modules, [5, 95])
+        diff_abs_max = max(abs(diff_vmin), abs(diff_vmax))
+        diff_vmin, diff_vmax = -diff_abs_max, diff_abs_max
+        
         im3 = ax3.imshow(diff_modules, cmap=plt.cm.RdBu_r, aspect='auto',
-                        vmin=-1, vmax=1, interpolation='nearest')
+                        vmin=diff_vmin, vmax=diff_vmax, interpolation='nearest')
         ax3.set_title('Module Differences\n(Morph - Patho2)', fontsize=14)
-        ax3.set_xticks(range(len(morph_modules_df.columns)))
-        ax3.set_xticklabels(morph_modules_df.columns, rotation=45, ha='right', fontsize=9)
+        ax3.set_xticks(range(len(variable_labels)))
+        ax3.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
         ax3.set_yticks(range(len(morph_modules_df)))
         ax3.set_yticklabels(morph_modules_df.index, fontsize=9)
         
