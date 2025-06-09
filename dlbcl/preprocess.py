@@ -68,14 +68,14 @@ class CLI(BaseMLCLI):
                     continue
                 with h5py.File(h5_path, 'r') as f:
                     slide_features.append(f['gigapath/slide_feature'][:])
-                    for m in ['gigapath', 'uni']:
-                        features = f[f'{m}/features'][:]
-                        # 中心
-                        center_feature = np.mean(features, axis=0)
-                        # 中心近傍
-                        medoid_feature = np.argmin(np.linalg.norm(features - center_feature, axis=1))
-                        center_features.append(center_feature)
-                        medoid_features.append(medoid_feature)
+                    features = f['gigapath/features'][:]
+                    # 中心
+                    center_feature = np.mean(features, axis=0)
+                    # 中心近傍 (medoidのインデックスではなく特徴量を取得)
+                    medoid_idx = np.argmin(np.linalg.norm(features - center_feature, axis=1))
+                    medoid_feature = features[medoid_idx]
+                    center_features.append(center_feature)
+                    medoid_features.append(medoid_feature)
 
                 data.append({
                     'name': name,
@@ -88,12 +88,14 @@ class CLI(BaseMLCLI):
         center_features = np.array(center_features)
         medoid_features = np.array(medoid_features)
         print('slide_features', slide_features.shape)
+        print('center_features', center_features.shape)
+        print('medoid_features', medoid_features.shape)
 
         o = str(self.dataset_dir / 'global_features.h5')
         with h5py.File(o, 'w') as f:
             f.create_dataset('slide_features', data=slide_features)
-            f.create_dataset('center_features', data=center_feature)
-            f.create_dataset('medoid_features', data=medoid_feature)
+            f.create_dataset('center_features', data=center_features)
+            f.create_dataset('medoid_features', data=medoid_features)
             f.create_dataset('names', data=df['name'].values)
             f.create_dataset('orders', data=df['order'].values)
             f.create_dataset('filenames', data=df['filename'].values)
@@ -104,7 +106,7 @@ class CLI(BaseMLCLI):
         n_neighbors: int = param(15, description="Number of neighbors for UMAP")
         min_dist: float = param(0.1, description="Minimum distance for UMAP")
         save_clusters: bool = param(True, description="Save cluster results to CSV")
-        feature: bool = param('slide', choices=['slide', 'center', 'medoid'])
+        feature: str = param('slide', choices=['slide', 'center', 'medoid'])
         noshow: bool = False
 
     def run_leiden(self, a: LeidenArgs):
@@ -112,7 +114,7 @@ class CLI(BaseMLCLI):
 
         # Load features
         with h5py.File(str(self.dataset_dir / 'global_features.h5'), 'r') as f:
-            features = f[f'gigapath/{a.feature}_features'][:]
+            features = f[f'{a.feature}_features'][:]
             names = f['names'][:]
             orders = f['orders'][:]
 
@@ -139,7 +141,7 @@ class CLI(BaseMLCLI):
 
         # Save cluster results
         if a.save_clusters:
-            clusters_file = str(self.dataset_dir / 'leiden_clusters_with_ids.csv')
+            clusters_file = str(self.dataset_dir / f'leiden_clusters_{a.feature}_with_ids.csv')
             results_df.set_index('sample_id').to_csv(clusters_file)
             print(f'Saved cluster results to: {clusters_file}')
 
@@ -148,6 +150,7 @@ class CLI(BaseMLCLI):
 
     class VisualizeArgs(CommonArgs):
         target: str = param('leiden_cluster', description="Target to visualize (leiden_cluster, clinical variables, etc.)")
+        feature: str = param('slide', choices=['slide', 'center', 'medoid'], description="Feature type to use for visualization")
         n_neighbors: int = param(10, description="Number of neighbors for UMAP")
         min_dist: float = param(0.05, description="Minimum distance for UMAP")
         metric: str = param('cosine', choices=['cosine', 'euclidean', 'manhattan'], description="Distance metric for UMAP")
@@ -157,8 +160,8 @@ class CLI(BaseMLCLI):
         """Unified visualization for any target using UMAP embedding"""
 
         # Load features and metadata
-        with h5py.File(str(self.dataset_dir / 'slide_features.h5'), 'r') as f:
-            features = f['features'][:]
+        with h5py.File(str(self.dataset_dir / 'global_features.h5'), 'r') as f:
+            features = f[f'{a.feature}_features'][:]
             # Handle different patient ID formats (numeric for morph, string for patho2)
             names_decoded = [v.decode('utf-8') for v in f['names'][:]]
             if a.dataset == 'morph':
@@ -183,14 +186,27 @@ class CLI(BaseMLCLI):
 
         # Add leiden_cluster if target requests it
         if a.target == 'leiden_cluster':
-            leiden_file = str(self.dataset_dir / 'leiden_clusters_with_ids.csv')
-            if os.path.exists(leiden_file):
+            # Try feature-specific clustering first, then default
+            leiden_files = [
+                str(self.dataset_dir / f'leiden_clusters_{a.feature}_with_ids.csv'),
+                str(self.dataset_dir / 'leiden_clusters_slide_with_ids.csv'),
+                str(self.dataset_dir / 'leiden_clusters_with_ids.csv')
+            ]
+
+            leiden_file = None
+            for file in leiden_files:
+                if os.path.exists(file):
+                    leiden_file = file
+                    break
+
+            if leiden_file:
                 leiden_df = pd.read_csv(leiden_file, index_col=0)
                 df['leiden_cluster'] = df.apply(
                     lambda row: leiden_df.loc[f"{row['name']}__{row['order']}", 'leiden_cluster']
                     if f"{row['name']}__{row['order']}" in leiden_df.index else -1, axis=1)
+                print(f'Using clustering results from: {leiden_file}')
             else:
-                raise FileNotFoundError(f'Leiden clustering results not found: {leiden_file}')
+                raise FileNotFoundError(f'Leiden clustering results not found. Tried: {leiden_files}')
 
         # Check if target exists
         if a.target not in df.columns:
