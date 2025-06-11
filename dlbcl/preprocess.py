@@ -71,7 +71,7 @@ class CLI(BaseMLCLI):
                     features = f['gigapath/features'][:]
                     # 中心
                     center_feature = np.mean(features, axis=0)
-                    # 中心近傍 (medoidのインデックスではなく特徴量を取得)
+                    # 中心最近傍
                     medoid_idx = np.argmin(np.linalg.norm(features - center_feature, axis=1))
                     medoid_feature = features[medoid_idx]
                     center_features.append(center_feature)
@@ -93,9 +93,9 @@ class CLI(BaseMLCLI):
 
         o = str(self.dataset_dir / 'global_features.h5')
         with h5py.File(o, 'w') as f:
-            f.create_dataset('slide_features', data=slide_features)
-            f.create_dataset('center_features', data=center_features)
-            f.create_dataset('medoid_features', data=medoid_features)
+            f.create_dataset('gigapath/slide_features', data=slide_features)
+            f.create_dataset('gigapath/center_features', data=center_features)
+            f.create_dataset('gigapath/medoid_features', data=medoid_features)
             f.create_dataset('names', data=df['name'].values)
             f.create_dataset('orders', data=df['order'].values)
             f.create_dataset('filenames', data=df['filename'].values)
