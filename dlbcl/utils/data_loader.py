@@ -33,10 +33,6 @@ def load_common_data(dataset: str):
         merged_data = feature_df.merge(clinical_data, on='patient_id', how='inner')
         print(f"Merged data: {len(merged_data)} samples")
 
-        # CD10のバイナリ化（0 or 1のみ）
-        if 'CD10 IHC' in merged_data.columns:
-            merged_data['CD10_binary'] = (merged_data['CD10 IHC'] > 0).astype(int)
-
         return {
             'clinical_data': clinical_data,
             'features': features,

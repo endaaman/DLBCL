@@ -59,21 +59,14 @@ class CLI(BaseMLCLI):
         """Compare correlation heatmaps between Morph and Patho2 datasets with unified feature ordering"""
 
         if not a.output_dir:
-            a.output_dir = 'out/compare_correlation'
+            a.output_dir = 'out/correlation/compare_correlation'
 
         os.makedirs(a.output_dir, exist_ok=True)
 
         print("Computing correlation matrices for both datasets...")
 
         # Load data for both datasets
-        morph_data_dict = load_common_data('morph')
-        patho2_data_dict = load_common_data('patho2')
-
-        if morph_data_dict is None or patho2_data_dict is None:
-            raise RuntimeError("Failed to load dataset(s). Check data availability.")
-
-        morph_merged = morph_data_dict['merged_data']
-        patho2_merged = patho2_data_dict['merged_data']
+        morph_merged, patho2_merged = self._load_both_datasets()
 
         print(f"Loaded morph data: {morph_merged.shape}")
         print(f"Loaded patho2 data: {patho2_merged.shape}")
@@ -91,131 +84,13 @@ class CLI(BaseMLCLI):
         morph_corr.to_csv(f"{a.output_dir}/morph/correlation_matrix.csv")
         patho2_corr.to_csv(f"{a.output_dir}/patho2/correlation_matrix.csv")
 
-        # Create comprehensive variable list combining both datasets
-        all_variables = []
+        # Get clinical mapping and prepare data matrices
+        clinical_mapping = self._get_clinical_mapping(patho2_merged.columns)
+        morph_subset, patho2_subset, variable_labels = self._prepare_comparison_matrices(
+            morph_corr, patho2_corr, clinical_mapping)
 
-        # Check which naming convention Patho2 uses in the correlation matrix
-        patho2_columns = list(patho2_corr.columns)
-        print(f"Patho2 columns in correlation matrix: {patho2_columns}")
-
-        # Determine mapping based on actual column names
-        if 'CD10 IHC' in patho2_columns:
-            # New naming convention
-            common_mapping = {
-                'CD10 IHC': 'CD10 IHC',
-                'MUM1 IHC': 'MUM1 IHC',
-                'BCL2 IHC': 'BCL2 IHC',
-                'BCL6 IHC': 'BCL6 IHC',
-                'MYC IHC': 'MYC IHC',
-                'HANS': 'HANS'
-            }
-        else:
-            # Old naming convention (short names)
-            common_mapping = {
-                'CD10 IHC': 'CD10',
-                'MUM1 IHC': 'MUM1',
-                'BCL2 IHC': 'BCL2',
-                'BCL6 IHC': 'BCL6',
-                'MYC IHC': 'MYC',
-                'HANS': 'HANS'
-            }
-
-        # Add common variables
-        for morph_var, patho2_var in common_mapping.items():
-            if morph_var in morph_corr.columns and patho2_var in patho2_corr.columns:
-                all_variables.append((morph_var, patho2_var, 'common'))
-
-        # Add Morph-only variables
-        morph_only = ['OS', 'PFS', 'Follow-up Status', 'Age', 'LDH', 'ECOG PS',
-                     'Stage', 'IPI Score', 'IPI Risk Group (4 Class)', 'RIPI Risk Group']
-        for var in morph_only:
-            if var in morph_corr.columns:
-                all_variables.append((var, None, 'morph_only'))
-
-        # Add Patho2-only variables
-        patho2_only = ['EBV']
-        for var in patho2_only:
-            if var in patho2_corr.columns:
-                all_variables.append((None, var, 'patho2_only'))
-
-        print(f"Total variables to display: {len(all_variables)}")
-        for i, (m, p, t) in enumerate(all_variables):
-            print(f"  {i+1}. {m} <-> {p} ({t})")
-
-        # Prepare data matrices
-        morph_clinical_vars = []
-        patho2_clinical_vars = []
-        variable_labels = []
-
-        for morph_var, patho2_var, var_type in all_variables:
-            if var_type == 'common':
-                morph_clinical_vars.append(morph_var)
-                patho2_clinical_vars.append(patho2_var)
-                # Use Morph naming for display (longer, more descriptive)
-                display_name = morph_var
-                variable_labels.append(display_name)
-            elif var_type == 'morph_only':
-                morph_clinical_vars.append(morph_var)
-                patho2_clinical_vars.append(None)
-                variable_labels.append(f"{morph_var}\n(Morph only)")
-            elif var_type == 'patho2_only':
-                morph_clinical_vars.append(None)
-                patho2_clinical_vars.append(patho2_var)
-                variable_labels.append(f"{patho2_var}\n(Patho2 only)")
-
-        print(f"Mapped clinical variables: {len(morph_clinical_vars)}")
-        print(f"Morph variables: {morph_clinical_vars}")
-        print(f"Patho2 variables: {patho2_clinical_vars}")
-
-        if len(morph_clinical_vars) == 0:
-            raise ValueError("No mapped clinical variables found between datasets")
-
-        # Create data matrices handling None values
-        morph_data = {}
-        patho2_data = {}
-
-        for i, (morph_var, patho2_var) in enumerate(zip(morph_clinical_vars, patho2_clinical_vars)):
-            col_name = f"col_{i}"  # Use index as column name
-
-            if morph_var:
-                morph_data[col_name] = morph_corr[morph_var]
-            else:
-                morph_data[col_name] = pd.Series([np.nan] * len(morph_corr), index=morph_corr.index)
-
-            if patho2_var:
-                patho2_data[col_name] = patho2_corr[patho2_var]
-            else:
-                patho2_data[col_name] = pd.Series([np.nan] * len(patho2_corr), index=patho2_corr.index)
-
-        morph_subset = pd.DataFrame(morph_data)
-        patho2_subset = pd.DataFrame(patho2_data)
-
-        # Use Morph's dendrogram ordering (from comprehensive_heatmap)
-        print("Loading feature ordering from Morph dendrogram...")
-
-        # Calculate hierarchical clustering using the same method as comprehensive_heatmap
-        from scipy.cluster.hierarchy import linkage, leaves_list
-        from scipy.spatial.distance import pdist
-
-        # Use ONLY common variables for fair dendrogram creation
-        print("Creating dendrogram using common variables only...")
-
-        # Extract only common variables (first 6 variables are common)
-        n_common = len([v for v in all_variables if v[2] == 'common'])
-        print(f"Using {n_common} common variables for dendrogram")
-
-        # Use both datasets' common variables for more robust clustering
-        morph_common_only = morph_subset.iloc[:, :n_common].fillna(0)
-        patho2_common_only = patho2_subset.iloc[:, :n_common].fillna(0)
-
-        # Average correlation patterns from both datasets for fairness
-        combined_common = (morph_common_only + patho2_common_only) / 2
-
-        feature_distance = pdist(combined_common.values, metric='euclidean')
-        feature_linkage = linkage(feature_distance, method='ward')
-        feature_order = leaves_list(feature_linkage)
-
-        print(f"Dendrogram created using combined patterns from {n_common} common variables")
+        # Create dendrogram for feature ordering
+        feature_linkage, feature_order = self._create_unified_dendrogram(morph_subset, patho2_subset)
 
         # Reorder both datasets using the same feature order
         morph_ordered = morph_subset.iloc[feature_order]
@@ -373,13 +248,298 @@ class CLI(BaseMLCLI):
         print("\n=== Creating Concatenated Unified Correlation ===")
         self._create_concatenated_correlation(common_mapping, feature_linkage, feature_order, a)
 
-        # Advanced analysis: Create feature modules from dendrogram clusters
-        print("\n=== Advanced Analysis: Feature Module Creation ===")
-        self._create_feature_modules(feature_linkage, feature_order, morph_ordered, patho2_ordered,
-                                   variable_labels, a)
-
         # Return None to avoid warning about unexpected return type
         return None
+
+    class ChannelCorrelationArgs(CommonArgs):
+        output_dir: str = param('', description="Output directory (defaults to out/channel_correlation)")
+        correlation_method: str = param('pearson', choices=['pearson', 'spearman'], description="Correlation method to use")
+        figsize_width: int = param(16, description="Figure width in inches")
+        figsize_height: int = param(12, description="Figure height in inches")
+
+    def run_channel_correlation(self, a: ChannelCorrelationArgs):
+        """Compare channel-clinical correlations between datasets and identify consistent markers"""
+
+        if not a.output_dir:
+            a.output_dir = 'out/correlation/channel_correlation'
+
+        os.makedirs(a.output_dir, exist_ok=True)
+
+        print("Channel correlation analysis...")
+
+        # Load data for both datasets
+        morph_merged, patho2_merged = self._load_both_datasets()
+
+        print(f"Morph data: {morph_merged.shape}, Patho2 data: {patho2_merged.shape}")
+
+        # Get feature columns
+        morph_features = [col for col in morph_merged.columns if col.startswith('feature_')]
+        patho2_features = [col for col in patho2_merged.columns if col.startswith('feature_')]
+
+        # Use existing mapping logic from run_compare_correlation
+        clinical_mapping = self._get_clinical_mapping(patho2_merged.columns)
+
+        # Calculate correlations for each dataset
+        print("Computing feature-clinical correlations...")
+        results = {}
+
+        for morph_col, patho2_col in clinical_mapping.items():
+            if morph_col not in morph_merged.columns or patho2_col not in patho2_merged.columns:
+                continue
+
+            print(f"Processing {morph_col} vs {patho2_col}...")
+
+            # Compute correlations using refactored helper
+            morph_corrs = self._compute_feature_clinical_correlations(
+                morph_merged, morph_features, morph_col, a.correlation_method)
+            patho2_corrs = self._compute_feature_clinical_correlations(
+                patho2_merged, patho2_features, patho2_col, a.correlation_method)
+
+            results[morph_col] = {
+                'morph_corrs': np.array(morph_corrs),
+                'patho2_corrs': np.array(patho2_corrs),
+                'patho2_name': patho2_col
+            }
+
+        # Create visualization and analysis
+        consistency_scores = self._create_correlation_scatter_plots(results, a)
+        self._save_correlation_results(results, consistency_scores, a)
+
+        print(f"\nResults saved to {a.output_dir}/")
+        print(f"- Scatter plots: channel_correlation_scatter.png")
+        print(f"- Consistency ranking: consistency_ranking.csv")
+        print(f"- Detailed correlations: feature_clinical_correlations.csv")
+
+    def _get_clinical_mapping(self, patho2_columns):
+        """Get clinical variable mapping based on patho2 naming convention"""
+        if 'CD10 IHC' in patho2_columns:
+            # New naming convention
+            return {
+                'CD10 IHC': 'CD10 IHC',
+                'MUM1 IHC': 'MUM1 IHC',
+                'BCL2 IHC': 'BCL2 IHC',
+                'BCL6 IHC': 'BCL6 IHC',
+                'MYC IHC': 'MYC IHC',
+                'HANS': 'HANS'
+            }
+        else:
+            # Old naming convention
+            return {
+                'CD10 IHC': 'CD10',
+                'MUM1 IHC': 'MUM1',
+                'BCL2 IHC': 'BCL2',
+                'BCL6 IHC': 'BCL6',
+                'MYC IHC': 'MYC',
+                'HANS': 'HANS'
+            }
+
+    def _compute_feature_clinical_correlations(self, merged_data, feature_cols, clinical_col, correlation_method):
+        """Compute correlations between all features and a single clinical variable"""
+        correlations = []
+
+        for feat_col in feature_cols:
+            feature_data = merged_data[feat_col]
+            clinical_data = merged_data[clinical_col]
+
+            valid_mask = ~(feature_data.isna() | clinical_data.isna())
+
+            if valid_mask.sum() >= 10:  # Minimum 10 samples for correlation
+                try:
+                    if correlation_method == 'pearson':
+                        corr, _ = pearsonr(feature_data[valid_mask], clinical_data[valid_mask])
+                    else:
+                        corr, _ = spearmanr(feature_data[valid_mask], clinical_data[valid_mask])
+                    correlations.append(corr)
+                except:
+                    correlations.append(np.nan)
+            else:
+                correlations.append(np.nan)
+
+        return correlations
+
+    def _create_correlation_scatter_plots(self, results, a):
+        """Create scatter plots comparing correlations between datasets"""
+        n_markers = len(results)
+        n_cols = 3
+        n_rows = (n_markers + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(a.figsize_width, a.figsize_height))
+        if n_rows == 1:
+            axes = axes.reshape(1, -1)
+
+        plot_idx = 0
+        consistency_scores = {}
+
+        for marker, data in results.items():
+            row = plot_idx // n_cols
+            col = plot_idx % n_cols
+            ax = axes[row, col]
+
+            morph_corrs = data['morph_corrs']
+            patho2_corrs = data['patho2_corrs']
+
+            # Remove NaN values for plotting and correlation calculation
+            valid_mask = ~(np.isnan(morph_corrs) | np.isnan(patho2_corrs))
+            morph_valid = morph_corrs[valid_mask]
+            patho2_valid = patho2_corrs[valid_mask]
+
+            if len(morph_valid) > 0:
+                ax.scatter(morph_valid, patho2_valid, alpha=0.6, s=1)
+
+                # Calculate consistency (correlation between dataset correlations)
+                if len(morph_valid) > 1:
+                    try:
+                        consistency, _ = pearsonr(morph_valid, patho2_valid)
+                        consistency_scores[marker] = consistency
+                    except:
+                        consistency_scores[marker] = np.nan
+                        consistency = np.nan
+                else:
+                    consistency_scores[marker] = np.nan
+                    consistency = np.nan
+
+                # Add diagonal line
+                min_val = min(np.min(morph_valid), np.min(patho2_valid))
+                max_val = max(np.max(morph_valid), np.max(patho2_valid))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5)
+
+                ax.set_xlabel(f'Morph {marker} Correlation')
+                ax.set_ylabel(f'Patho2 {data["patho2_name"]} Correlation')
+                ax.set_title(f'{marker}\nConsistency: {consistency:.3f}' if not np.isnan(consistency) else f'{marker}\nConsistency: N/A')
+                ax.grid(True, alpha=0.3)
+            else:
+                ax.text(0.5, 0.5, 'No valid data', ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f'{marker}\nNo data')
+                consistency_scores[marker] = np.nan
+
+            plot_idx += 1
+
+        # Hide unused subplots
+        for i in range(plot_idx, n_rows * n_cols):
+            row = i // n_cols
+            col = i % n_cols
+            axes[row, col].set_visible(False)
+
+        plt.tight_layout()
+        plt.savefig(f"{a.output_dir}/channel_correlation_scatter.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+        return consistency_scores
+
+    def _save_correlation_results(self, results, consistency_scores, a):
+        """Save correlation analysis results to files"""
+        # Create consistency ranking
+        print("\n=== Dataset Consistency Ranking ===")
+        consistency_df = pd.DataFrame(list(consistency_scores.items()),
+                                    columns=['Marker', 'Consistency'])
+        consistency_df = consistency_df.sort_values('Consistency', ascending=False)
+
+        print(consistency_df.round(3))
+        consistency_df.to_csv(f"{a.output_dir}/consistency_ranking.csv", index=False)
+
+        # Save detailed correlation data
+        correlation_data = {}
+        for marker, data in results.items():
+            correlation_data[f'{marker}_morph'] = data['morph_corrs']
+            correlation_data[f'{marker}_patho2'] = data['patho2_corrs']
+
+        correlation_df = pd.DataFrame(correlation_data)
+        correlation_df.to_csv(f"{a.output_dir}/feature_clinical_correlations.csv")
+
+    def _load_both_datasets(self):
+        """Load both morph and patho2 datasets for comparison analysis"""
+        morph_data_dict = load_common_data('morph')
+        patho2_data_dict = load_common_data('patho2')
+
+        if morph_data_dict is None or patho2_data_dict is None:
+            raise RuntimeError("Failed to load dataset(s). Check data availability.")
+
+        return morph_data_dict['merged_data'], patho2_data_dict['merged_data']
+
+    def _prepare_comparison_matrices(self, morph_corr, patho2_corr, clinical_mapping):
+        """Prepare data matrices for comparison analysis"""
+        # Create comprehensive variable list combining both datasets
+        all_variables = []
+
+        # Add common variables
+        for morph_var, patho2_var in clinical_mapping.items():
+            if morph_var in morph_corr.columns and patho2_var in patho2_corr.columns:
+                all_variables.append((morph_var, patho2_var, 'common'))
+
+        # Add Morph-only variables
+        morph_only = ['OS', 'PFS', 'Follow-up Status', 'Age', 'LDH', 'ECOG PS',
+                     'Stage', 'IPI Score', 'IPI Risk Group (4 Class)', 'RIPI Risk Group']
+        for var in morph_only:
+            if var in morph_corr.columns:
+                all_variables.append((var, None, 'morph_only'))
+
+        # Add Patho2-only variables
+        patho2_only = ['EBV']
+        for var in patho2_only:
+            if var in patho2_corr.columns:
+                all_variables.append((None, var, 'patho2_only'))
+
+        # Prepare data matrices
+        morph_clinical_vars = []
+        patho2_clinical_vars = []
+        variable_labels = []
+
+        for morph_var, patho2_var, var_type in all_variables:
+            if var_type == 'common':
+                morph_clinical_vars.append(morph_var)
+                patho2_clinical_vars.append(patho2_var)
+                variable_labels.append(morph_var)
+            elif var_type == 'morph_only':
+                morph_clinical_vars.append(morph_var)
+                patho2_clinical_vars.append(None)
+                variable_labels.append(f"{morph_var}\n(Morph only)")
+            elif var_type == 'patho2_only':
+                morph_clinical_vars.append(None)
+                patho2_clinical_vars.append(patho2_var)
+                variable_labels.append(f"{patho2_var}\n(Patho2 only)")
+
+        # Create data matrices handling None values
+        morph_data = {}
+        patho2_data = {}
+
+        for i, (morph_var, patho2_var) in enumerate(zip(morph_clinical_vars, patho2_clinical_vars)):
+            col_name = f"col_{i}"
+
+            if morph_var:
+                morph_data[col_name] = morph_corr[morph_var]
+            else:
+                morph_data[col_name] = pd.Series([np.nan] * len(morph_corr), index=morph_corr.index)
+
+            if patho2_var:
+                patho2_data[col_name] = patho2_corr[patho2_var]
+            else:
+                patho2_data[col_name] = pd.Series([np.nan] * len(patho2_corr), index=patho2_corr.index)
+
+        morph_subset = pd.DataFrame(morph_data)
+        patho2_subset = pd.DataFrame(patho2_data)
+
+        return morph_subset, patho2_subset, variable_labels
+
+    def _create_unified_dendrogram(self, morph_subset, patho2_subset):
+        """Create unified dendrogram using common variables from both datasets"""
+        from scipy.cluster.hierarchy import linkage, leaves_list
+        from scipy.spatial.distance import pdist
+
+        # Use common variables for fair dendrogram creation
+        n_common = len([col for col in morph_subset.columns if not morph_subset[col].isna().all()])
+
+        # Use both datasets' common variables for more robust clustering
+        morph_common_only = morph_subset.iloc[:, :n_common].fillna(0)
+        patho2_common_only = patho2_subset.iloc[:, :n_common].fillna(0)
+
+        # Average correlation patterns from both datasets for fairness
+        combined_common = (morph_common_only + patho2_common_only) / 2
+
+        feature_distance = pdist(combined_common.values, metric='euclidean')
+        feature_linkage = linkage(feature_distance, method='ward')
+        feature_order = leaves_list(feature_linkage)
+
+        return feature_linkage, feature_order
 
     def _compute_correlation_matrix(self, merged_data, correlation_method='pearson'):
         """Compute correlation matrix between features and clinical variables"""
@@ -553,191 +713,6 @@ class CLI(BaseMLCLI):
         print(f"Concatenated correlation analysis completed!")
         print(f"Results saved to: {a.output_dir}/unified_correlation_concatenated.png")
         print(f"Correlation matrix saved to: {a.output_dir}/concatenated_correlation_matrix.csv")
-
-    def _create_feature_modules(self, feature_linkage, feature_order, morph_ordered, patho2_ordered,
-                               variable_labels, a):
-        """Create feature modules from dendrogram clusters and analyze their biological meaning"""
-        from scipy.cluster.hierarchy import fcluster
-
-        print("Creating feature modules from dendrogram clusters...")
-
-        # Extract modules at different hierarchy levels
-        module_configs = [
-            {'n_clusters': 5, 'name': 'major'},
-            {'n_clusters': 10, 'name': 'moderate'},
-            {'n_clusters': 20, 'name': 'fine'}
-        ]
-
-        for config in module_configs:
-            n_clusters = config['n_clusters']
-            module_name = config['name']
-
-            print(f"\n--- {module_name.upper()} MODULES ({n_clusters} clusters) ---")
-
-            # Get cluster assignments
-            clusters = fcluster(feature_linkage, n_clusters, criterion='maxclust')
-
-            # Map back to original feature order
-            cluster_mapping = {}
-            for i, original_idx in enumerate(feature_order):
-                cluster_mapping[original_idx] = clusters[i]
-
-            # Analyze each module
-            module_analysis = {}
-            for cluster_id in range(1, n_clusters + 1):
-                # Get features in this cluster
-                cluster_features = [i for i, c in enumerate(clusters) if c == cluster_id]
-                cluster_size = len(cluster_features)
-
-                if cluster_size < 5:  # Skip tiny clusters
-                    continue
-
-                # Extract correlation patterns for this module
-                morph_module = morph_ordered.iloc[cluster_features]
-                patho2_module = patho2_ordered.iloc[cluster_features]
-
-                # Calculate module statistics
-                morph_means = morph_module.mean()
-                patho2_means = patho2_module.mean()
-                module_consistency = np.corrcoef(morph_means.fillna(0), patho2_means.fillna(0))[0,1]
-
-                # Find dominant clinical associations
-                combined_means = (morph_means + patho2_means) / 2
-                combined_means = combined_means.fillna(0)
-
-                # Get top positive and negative associations
-                top_pos = combined_means.nlargest(3)
-                top_neg = combined_means.nsmallest(3)
-
-                module_analysis[cluster_id] = {
-                    'size': cluster_size,
-                    'consistency': module_consistency,
-                    'top_positive': top_pos.to_dict(),
-                    'top_negative': top_neg.to_dict(),
-                    'feature_indices': cluster_features
-                }
-
-                print(f"Module {cluster_id}: {cluster_size} features, consistency={module_consistency:.3f}")
-                print(f"  Top positive: {list(top_pos.index[:2])}")
-                print(f"  Top negative: {list(top_neg.index[:2])}")
-
-            # Save module analysis
-            import json
-            module_file = f"{a.output_dir}/feature_modules_{module_name}.json"
-
-            # Convert numpy types to Python native types for JSON serialization
-            serializable_analysis = {}
-            for k, v in module_analysis.items():
-                serializable_analysis[k] = {
-                    'size': int(v['size']),
-                    'consistency': float(v['consistency']) if not np.isnan(v['consistency']) else 0.0,
-                    'top_positive': {str(kk): float(vv) for kk, vv in v['top_positive'].items()},
-                    'top_negative': {str(kk): float(vv) for kk, vv in v['top_negative'].items()},
-                    'feature_indices': [int(x) for x in v['feature_indices']]
-                }
-
-            with open(module_file, 'w') as f:
-                json.dump(serializable_analysis, f, indent=2)
-            print(f"Saved {module_name} module analysis to: {module_file}")
-
-        # Create module-based reduced features for further analysis
-        self._create_module_features(module_analysis, morph_ordered, patho2_ordered, variable_labels, a)
-
-    def _create_module_features(self, module_analysis, morph_ordered, patho2_ordered, variable_labels, a):
-        """Create reduced feature representation based on modules"""
-
-        print("\n--- MODULE-BASED FEATURE REDUCTION ---")
-
-        # Create module features by averaging within each module
-        morph_module_features = {}
-        patho2_module_features = {}
-
-        for module_id, module_info in module_analysis.items():
-            if module_info['size'] < 10:  # Only use substantial modules
-                continue
-
-            feature_indices = module_info['feature_indices']
-
-            # Average features within module
-            morph_module_avg = morph_ordered.iloc[feature_indices].mean()
-            patho2_module_avg = patho2_ordered.iloc[feature_indices].mean()
-
-            morph_module_features[f'module_{module_id}'] = morph_module_avg
-            patho2_module_features[f'module_{module_id}'] = patho2_module_avg
-
-        morph_modules_df = pd.DataFrame(morph_module_features).T
-        patho2_modules_df = pd.DataFrame(patho2_module_features).T
-
-        print(f"Created {len(morph_modules_df)} module features from {len(morph_ordered)} original features")
-
-        # Save module features
-        morph_modules_df.to_csv(f"{a.output_dir}/morph_module_features.csv")
-        patho2_modules_df.to_csv(f"{a.output_dir}/patho2_module_features.csv")
-
-        # Create module comparison heatmap
-        self._plot_module_comparison(morph_modules_df, patho2_modules_df, variable_labels, a)
-
-    def _plot_module_comparison(self, morph_modules_df, patho2_modules_df, variable_labels, a):
-        """Create comparison plot for module features"""
-
-        # Calculate dynamic color range based on actual data
-        all_values = np.concatenate([morph_modules_df.values.flatten(), patho2_modules_df.values.flatten()])
-        valid_values = all_values[~np.isnan(all_values)]
-        vmin, vmax = np.percentile(valid_values, [5, 95])  # Use 5-95 percentile for better contrast
-
-        # Make sure range is symmetric around 0 for better interpretation
-        abs_max = max(abs(vmin), abs(vmax))
-        vmin, vmax = -abs_max, abs_max
-
-        print(f"Using dynamic color range: [{vmin:.3f}, {vmax:.3f}]")
-
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 6))
-
-        # Morph modules
-        im1 = ax1.imshow(morph_modules_df.values, cmap=plt.cm.RdBu_r, aspect='auto',
-                        vmin=vmin, vmax=vmax, interpolation='nearest')
-        ax1.set_title('MORPH Module Features', fontsize=14)
-        ax1.set_xticks(range(len(variable_labels)))
-        ax1.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
-        ax1.set_yticks(range(len(morph_modules_df)))
-        ax1.set_yticklabels(morph_modules_df.index, fontsize=9)
-
-        # Patho2 modules
-        im2 = ax2.imshow(patho2_modules_df.values, cmap=plt.cm.RdBu_r, aspect='auto',
-                        vmin=vmin, vmax=vmax, interpolation='nearest')
-        ax2.set_title('PATHO2 Module Features', fontsize=14)
-        ax2.set_xticks(range(len(variable_labels)))
-        ax2.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
-        ax2.set_yticks(range(len(patho2_modules_df)))
-        ax2.set_yticklabels(patho2_modules_df.index, fontsize=9)
-
-        # Difference
-        diff_modules = morph_modules_df.values - patho2_modules_df.values
-        diff_vmin, diff_vmax = np.nanpercentile(diff_modules, [5, 95])
-        diff_abs_max = max(abs(diff_vmin), abs(diff_vmax))
-        diff_vmin, diff_vmax = -diff_abs_max, diff_abs_max
-
-        im3 = ax3.imshow(diff_modules, cmap=plt.cm.RdBu_r, aspect='auto',
-                        vmin=diff_vmin, vmax=diff_vmax, interpolation='nearest')
-        ax3.set_title('Module Differences\n(Morph - Patho2)', fontsize=14)
-        ax3.set_xticks(range(len(variable_labels)))
-        ax3.set_xticklabels(variable_labels, rotation=45, ha='right', fontsize=9)
-        ax3.set_yticks(range(len(morph_modules_df)))
-        ax3.set_yticklabels(morph_modules_df.index, fontsize=9)
-
-        # Shared colorbar
-        fig.subplots_adjust(right=0.9)
-        cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-        cbar = plt.colorbar(im3, cax=cbar_ax)
-        cbar.set_label('Correlation', rotation=270, labelpad=20)
-
-        plt.suptitle('ViT Feature Modules: Biological Pattern Abstraction', fontsize=16, y=0.98)
-        plt.tight_layout()
-
-        plt.savefig(f"{a.output_dir}/vit_module_analysis.png", dpi=300, bbox_inches='tight')
-        plt.close()
-
-        print(f"Module comparison plot saved to: {a.output_dir}/vit_module_analysis.png")
 
 
 if __name__ == '__main__':

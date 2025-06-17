@@ -115,8 +115,6 @@ class CLI(BaseMLCLI):
         # Generate survival curves
         self._create_survival_curves(survival_df, a)
 
-        return survival_df
-
     def _create_survival_curves(self, df, a):
         """Create Kaplan-Meier survival curves"""
         from lifelines import KaplanMeierFitter
@@ -299,3 +297,6 @@ class CLI(BaseMLCLI):
             print(f"  Summary: {summary_file}")
 
 
+if __name__ == '__main__':
+    cli = CLI()
+    cli.run()
