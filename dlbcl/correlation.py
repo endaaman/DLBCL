@@ -37,6 +37,10 @@ import anndata as ad
 
 from .utils import BaseMLCLI, BaseMLArgs
 from .utils.data_loader import load_common_data
+from .utils.correlation import (
+    load_both_datasets, get_clinical_mapping, compute_correlation_matrix,
+    prepare_comparison_matrices, create_unified_dendrogram
+)
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
@@ -66,14 +70,14 @@ class CLI(BaseMLCLI):
         print("Computing correlation matrices for both datasets...")
 
         # Load data for both datasets
-        morph_merged, patho2_merged = self._load_both_datasets()
+        morph_merged, patho2_merged = load_both_datasets()
 
         print(f"Loaded morph data: {morph_merged.shape}")
         print(f"Loaded patho2 data: {patho2_merged.shape}")
 
         # Compute correlation matrices
-        morph_corr = self._compute_correlation_matrix(morph_merged, a.correlation_method)
-        patho2_corr = self._compute_correlation_matrix(patho2_merged, a.correlation_method)
+        morph_corr = compute_correlation_matrix(morph_merged, a.correlation_method)
+        patho2_corr = compute_correlation_matrix(patho2_merged, a.correlation_method)
 
         print(f"Morph correlation matrix: {morph_corr.shape}")
         print(f"Patho2 correlation matrix: {patho2_corr.shape}")
@@ -85,12 +89,12 @@ class CLI(BaseMLCLI):
         patho2_corr.to_csv(f"{a.output_dir}/patho2/correlation_matrix.csv")
 
         # Get clinical mapping and prepare data matrices
-        clinical_mapping = self._get_clinical_mapping(patho2_merged.columns)
-        morph_subset, patho2_subset, variable_labels = self._prepare_comparison_matrices(
+        clinical_mapping = get_clinical_mapping(patho2_merged.columns)
+        morph_subset, patho2_subset, variable_labels = prepare_comparison_matrices(
             morph_corr, patho2_corr, clinical_mapping)
 
         # Create dendrogram for feature ordering
-        feature_linkage, feature_order = self._create_unified_dendrogram(morph_subset, patho2_subset)
+        feature_linkage, feature_order = create_unified_dendrogram(morph_subset, patho2_subset)
 
         # Reorder both datasets using the same feature order
         morph_ordered = morph_subset.iloc[feature_order]
@@ -268,7 +272,7 @@ class CLI(BaseMLCLI):
         print("Channel correlation analysis...")
 
         # Load data for both datasets
-        morph_merged, patho2_merged = self._load_both_datasets()
+        morph_merged, patho2_merged = load_both_datasets()
 
         print(f"Morph data: {morph_merged.shape}, Patho2 data: {patho2_merged.shape}")
 
@@ -277,7 +281,7 @@ class CLI(BaseMLCLI):
         patho2_features = [col for col in patho2_merged.columns if col.startswith('feature_')]
 
         # Use existing mapping logic from run_compare_correlation
-        clinical_mapping = self._get_clinical_mapping(patho2_merged.columns)
+        clinical_mapping = get_clinical_mapping(patho2_merged.columns)
 
         # Calculate correlations for each dataset
         print("Computing feature-clinical correlations...")
@@ -310,28 +314,6 @@ class CLI(BaseMLCLI):
         print(f"- Consistency ranking: consistency_ranking.csv")
         print(f"- Detailed correlations: feature_clinical_correlations.csv")
 
-    def _get_clinical_mapping(self, patho2_columns):
-        """Get clinical variable mapping based on patho2 naming convention"""
-        if 'CD10 IHC' in patho2_columns:
-            # New naming convention
-            return {
-                'CD10 IHC': 'CD10 IHC',
-                'MUM1 IHC': 'MUM1 IHC',
-                'BCL2 IHC': 'BCL2 IHC',
-                'BCL6 IHC': 'BCL6 IHC',
-                'MYC IHC': 'MYC IHC',
-                'HANS': 'HANS'
-            }
-        else:
-            # Old naming convention
-            return {
-                'CD10 IHC': 'CD10',
-                'MUM1 IHC': 'MUM1',
-                'BCL2 IHC': 'BCL2',
-                'BCL6 IHC': 'BCL6',
-                'MYC IHC': 'MYC',
-                'HANS': 'HANS'
-            }
 
     def _compute_feature_clinical_correlations(self, merged_data, feature_cols, clinical_col, correlation_method):
         """Compute correlations between all features and a single clinical variable"""
@@ -446,8 +428,12 @@ class CLI(BaseMLCLI):
         correlation_df = pd.DataFrame(correlation_data)
         correlation_df.to_csv(f"{a.output_dir}/feature_clinical_correlations.csv")
 
-    def _load_both_datasets(self):
-        """Load both morph and patho2 datasets for comparison analysis"""
+    def _create_concatenated_correlation(self, common_mapping, feature_linkage, feature_order, a):
+        """Create unified correlation heatmap by concatenating both datasets (common columns only)"""
+
+        print("Loading and concatenating datasets...")
+
+        # Load both datasets using the same approach as in _pre_common
         morph_data_dict = load_common_data('morph')
         patho2_data_dict = load_common_data('patho2')
 

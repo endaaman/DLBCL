@@ -21,6 +21,7 @@ dependencies = [
     "joblib>=1.4.2",
     "leidenalg>=0.10.2",
     "matplotlib>=3.9.4",
+    "matplotlib-venn>=0.11.0",
     "networkx>=3.3",
     "numpy<2",
     "opencv-python-headless>=4.11.0.86",
@@ -49,6 +50,7 @@ dependencies = [
     "lifelines>=0.30.0",
     "igraph>=0.11.8",
     "scanpy>=1.11.2",
+    "combat>=0.3.3",
 ]
 
 [tool.uv.sources]

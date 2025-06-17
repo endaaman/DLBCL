@@ -10,6 +10,10 @@ from pydantic_autocli import param
 
 from .utils import BaseMLCLI
 from .utils.data_loader import load_common_data
+from .utils.correlation import (
+    load_both_datasets, get_clinical_mapping, compute_correlation_matrix,
+    prepare_comparison_matrices, create_unified_dendrogram
+)
 
 
 class CLI(BaseMLCLI):
@@ -32,22 +36,22 @@ class CLI(BaseMLCLI):
         
         print("Feature module analysis...")
         
-        # Load data for both datasets
-        morph_merged, patho2_merged = self._load_both_datasets()
+        # Load data for both datasets - using inherited method
+        morph_merged, patho2_merged = load_both_datasets()
         
         print(f"Morph data: {morph_merged.shape}, Patho2 data: {patho2_merged.shape}")
         
-        # Compute correlation matrices
-        morph_corr = self._compute_correlation_matrix(morph_merged, a.correlation_method)
-        patho2_corr = self._compute_correlation_matrix(patho2_merged, a.correlation_method)
+        # Compute correlation matrices - using inherited method
+        morph_corr = compute_correlation_matrix(morph_merged, a.correlation_method)
+        patho2_corr = compute_correlation_matrix(patho2_merged, a.correlation_method)
         
-        # Get clinical mapping and prepare data matrices
-        clinical_mapping = self._get_clinical_mapping(patho2_merged.columns)
-        morph_subset, patho2_subset, variable_labels = self._prepare_comparison_matrices(
+        # Get clinical mapping and prepare data matrices - using inherited methods
+        clinical_mapping = get_clinical_mapping(patho2_merged.columns)
+        morph_subset, patho2_subset, variable_labels = prepare_comparison_matrices(
             morph_corr, patho2_corr, clinical_mapping)
         
-        # Create dendrogram for feature ordering
-        feature_linkage, feature_order = self._create_unified_dendrogram(morph_subset, patho2_subset)
+        # Create dendrogram for feature ordering - using inherited method
+        feature_linkage, feature_order = create_unified_dendrogram(morph_subset, patho2_subset)
         
         # Reorder data using dendrogram
         morph_ordered = morph_subset.iloc[feature_order]
@@ -59,159 +63,6 @@ class CLI(BaseMLCLI):
                                    variable_labels, a)
         
         print(f"\nModule analysis completed! Results saved to {a.output_dir}")
-
-    def _load_both_datasets(self):
-        """Load both morph and patho2 datasets for comparison analysis"""
-        morph_data_dict = load_common_data('morph')
-        patho2_data_dict = load_common_data('patho2')
-        
-        if morph_data_dict is None or patho2_data_dict is None:
-            raise RuntimeError("Failed to load dataset(s). Check data availability.")
-        
-        return morph_data_dict['merged_data'], patho2_data_dict['merged_data']
-
-    def _get_clinical_mapping(self, patho2_columns):
-        """Get clinical variable mapping based on patho2 naming convention"""
-        if 'CD10 IHC' in patho2_columns:
-            # New naming convention
-            return {
-                'CD10 IHC': 'CD10 IHC',
-                'MUM1 IHC': 'MUM1 IHC',
-                'BCL2 IHC': 'BCL2 IHC',
-                'BCL6 IHC': 'BCL6 IHC',
-                'MYC IHC': 'MYC IHC',
-                'HANS': 'HANS'
-            }
-        else:
-            # Old naming convention
-            return {
-                'CD10 IHC': 'CD10',
-                'MUM1 IHC': 'MUM1',
-                'BCL2 IHC': 'BCL2',
-                'BCL6 IHC': 'BCL6',
-                'MYC IHC': 'MYC',
-                'HANS': 'HANS'
-            }
-
-    def _compute_correlation_matrix(self, merged_data, correlation_method='pearson'):
-        """Compute correlation matrix between features and clinical variables"""
-        # Get clinical columns (maintaining original order)
-        clinical_cols = [col for col in merged_data.columns if not col.startswith('feature_') and col != 'patient_id']
-        feature_cols = [col for col in merged_data.columns if col.startswith('feature_')]
-
-        print(f"Computing correlations: {len(feature_cols)} features x {len(clinical_cols)} clinical variables")
-
-        # Create correlation matrix
-        correlation_matrix = np.full((len(feature_cols), len(clinical_cols)), np.nan)
-
-        for i, feature_col in enumerate(feature_cols):
-            for j, clinical_col in enumerate(clinical_cols):
-                feature_data = merged_data[feature_col]
-                clinical_data = merged_data[clinical_col]
-
-                valid_mask = ~(feature_data.isna() | clinical_data.isna())
-
-                if valid_mask.sum() >= 10:  # Minimum 10 samples for correlation
-                    feature_valid = feature_data[valid_mask]
-                    clinical_valid = clinical_data[valid_mask]
-
-                    try:
-                        if correlation_method == 'pearson':
-                            corr, _ = pearsonr(feature_valid, clinical_valid)
-                        else:
-                            corr, _ = spearmanr(feature_valid, clinical_valid)
-                        correlation_matrix[i, j] = corr
-                    except:
-                        pass  # Keep as NaN if correlation fails
-
-        # Convert to DataFrame
-        corr_df = pd.DataFrame(correlation_matrix,
-                              index=feature_cols,
-                              columns=clinical_cols)
-
-        return corr_df
-
-    def _prepare_comparison_matrices(self, morph_corr, patho2_corr, clinical_mapping):
-        """Prepare data matrices for comparison analysis"""
-        # Create comprehensive variable list combining both datasets
-        all_variables = []
-        
-        # Add common variables
-        for morph_var, patho2_var in clinical_mapping.items():
-            if morph_var in morph_corr.columns and patho2_var in patho2_corr.columns:
-                all_variables.append((morph_var, patho2_var, 'common'))
-        
-        # Add Morph-only variables
-        morph_only = ['OS', 'PFS', 'Follow-up Status', 'Age', 'LDH', 'ECOG PS',
-                     'Stage', 'IPI Score', 'IPI Risk Group (4 Class)', 'RIPI Risk Group']
-        for var in morph_only:
-            if var in morph_corr.columns:
-                all_variables.append((var, None, 'morph_only'))
-        
-        # Add Patho2-only variables
-        patho2_only = ['EBV']
-        for var in patho2_only:
-            if var in patho2_corr.columns:
-                all_variables.append((None, var, 'patho2_only'))
-        
-        # Prepare data matrices
-        morph_clinical_vars = []
-        patho2_clinical_vars = []
-        variable_labels = []
-        
-        for morph_var, patho2_var, var_type in all_variables:
-            if var_type == 'common':
-                morph_clinical_vars.append(morph_var)
-                patho2_clinical_vars.append(patho2_var)
-                variable_labels.append(morph_var)
-            elif var_type == 'morph_only':
-                morph_clinical_vars.append(morph_var)
-                patho2_clinical_vars.append(None)
-                variable_labels.append(f"{morph_var}\n(Morph only)")
-            elif var_type == 'patho2_only':
-                morph_clinical_vars.append(None)
-                patho2_clinical_vars.append(patho2_var)
-                variable_labels.append(f"{patho2_var}\n(Patho2 only)")
-        
-        # Create data matrices handling None values
-        morph_data = {}
-        patho2_data = {}
-        
-        for i, (morph_var, patho2_var) in enumerate(zip(morph_clinical_vars, patho2_clinical_vars)):
-            col_name = f"col_{i}"
-            
-            if morph_var:
-                morph_data[col_name] = morph_corr[morph_var]
-            else:
-                morph_data[col_name] = pd.Series([np.nan] * len(morph_corr), index=morph_corr.index)
-            
-            if patho2_var:
-                patho2_data[col_name] = patho2_corr[patho2_var]
-            else:
-                patho2_data[col_name] = pd.Series([np.nan] * len(patho2_corr), index=patho2_corr.index)
-        
-        morph_subset = pd.DataFrame(morph_data)
-        patho2_subset = pd.DataFrame(patho2_data)
-        
-        return morph_subset, patho2_subset, variable_labels
-
-    def _create_unified_dendrogram(self, morph_subset, patho2_subset):
-        """Create unified dendrogram using common variables from both datasets"""
-        # Use common variables for fair dendrogram creation
-        n_common = len([col for col in morph_subset.columns if not morph_subset[col].isna().all()])
-        
-        # Use both datasets' common variables for more robust clustering
-        morph_common_only = morph_subset.iloc[:, :n_common].fillna(0)
-        patho2_common_only = patho2_subset.iloc[:, :n_common].fillna(0)
-        
-        # Average correlation patterns from both datasets for fairness
-        combined_common = (morph_common_only + patho2_common_only) / 2
-        
-        feature_distance = pdist(combined_common.values, metric='euclidean')
-        feature_linkage = linkage(feature_distance, method='ward')
-        feature_order = leaves_list(feature_linkage)
-        
-        return feature_linkage, feature_order
 
     def _create_feature_modules(self, feature_linkage, feature_order, morph_ordered, patho2_ordered,
                                variable_labels, a):

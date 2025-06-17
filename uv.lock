@@ -307,6 +307,18 @@ wheels = [
 ]
 
 [[package]]
+name = "combat"
+version = "0.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mpmath" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "patsy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/fc/02b94724719fe2ee6557133c5b3eb2b3a6c2b0a193dc09f808bfc4c8a246/combat-0.3.3.tar.gz", hash = "sha256:25ed428f5c22d56545588c7ff2098982087bddd67b79a3220c3039d855b01271", size = 34718, upload-time = "2022-11-29T15:42:06.545Z" }
+
+[[package]]
 name = "comm"
 version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -399,6 +411,7 @@ name = "dlbcl"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "combat" },
     { name = "einops" },
     { name = "fairscale" },
     { name = "gigapath" },
@@ -410,6 +423,7 @@ dependencies = [
     { name = "leidenalg" },
     { name = "lifelines" },
     { name = "matplotlib" },
+    { name = "matplotlib-venn" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
@@ -457,6 +471,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "combat", specifier = ">=0.3.3" },
     { name = "einops", specifier = ">=0.8.1" },
     { name = "fairscale", specifier = ">=0.4.13" },
     { name = "flash-attn", marker = "extra == 'compile'" },
@@ -469,6 +484,7 @@ requires-dist = [
     { name = "leidenalg", specifier = ">=0.10.2" },
     { name = "lifelines", specifier = ">=0.30.0" },
     { name = "matplotlib", specifier = ">=3.9.4" },
+    { name = "matplotlib-venn", specifier = ">=0.11.0" },
     { name = "networkx", specifier = ">=3.3" },
     { name = "numpy", specifier = "<2" },
     { name = "opencv-python-headless", specifier = ">=4.11.0.86" },
@@ -1279,6 +1295,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/99/5b/a36a337438a14116b
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/8e/9ad090d3553c280a8060fbf6e24dc1c0c29704ee7d1c372f0c174aa59285/matplotlib_inline-0.1.7-py3-none-any.whl", hash = "sha256:df192d39a4ff8f21b1895d72e6a13f5fcc5099f00fa84384e0ea28c2cc0653ca", size = 9899, upload-time = "2024-04-15T13:44:43.265Z" },
 ]
+
+[[package]]
+name = "matplotlib-venn"
+version = "1.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/f7/47bddf95492f4d1370ed7164d2b16407805e8eeb38231361de65d387a562/matplotlib-venn-1.1.2.tar.gz", hash = "sha256:6f2b07a03e9bb5a62de2f32f965216739e175176f9d654dd19e7af2c22ec36e3", size = 40821, upload-time = "2025-02-25T10:44:24.294Z" }
 
 [[package]]
 name = "mdurl"
