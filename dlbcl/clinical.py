@@ -12,13 +12,13 @@ from pydantic import Field
 from pydantic_autocli import param
 from statsmodels.stats.multitest import multipletests
 
-from .utils import BaseMLCLI
+from .utils import ExperimentCLI
 from .utils.data_loader import load_common_data
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
 
-class CLI(BaseMLCLI):
+class CLI(ExperimentCLI):
     class CommonArgs(BaseMLCLI.CommonArgs):
         pass
 

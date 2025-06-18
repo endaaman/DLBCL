@@ -18,10 +18,7 @@ from combat.pycombat import pycombat
 import umap
 import matplotlib.pyplot as plt
 
-try:
-    from .seed import fix_global_seed, get_global_seed
-except ImportError:
-    from dlbcl.utils.seed import fix_global_seed, get_global_seed
+from .seed import fix_global_seed, get_global_seed
 
 
 @dataclass
@@ -63,7 +60,9 @@ def load_dataset(dataset: str) -> Dataset:
     elif dataset == 'patho2':
         base_dir = 'data/DLBCL-Patho2'
         clinical_data = pd.read_csv(f'{base_dir}/clinical_data_cleaned_path2_mod.csv')
-        target_cols = ['MYC IHC', 'BCL2 IHC', 'BCL6 IHC', 'CD10 IHC', 'MUM1 IHC', 'HANS', 'Age']
+        # NOTE: patho2はEBVをエクストラで持つが、臨床情報がない
+        target_cols = ['MYC IHC', 'BCL2 IHC', 'BCL6 IHC', 'CD10 IHC', 'MUM1 IHC', 'HANS', 'EBV',
+                       'Age']
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
 
@@ -118,12 +117,11 @@ def merge_dataset(dataset_morph: Dataset, dataset_patho2: Dataset) -> Dataset:
     )
 
 
-class BaseMLCLI(AutoCLI):
+class ExperimentCLI(AutoCLI):
     class CommonArgs(BaseModel):
-        device: str = 'cuda'
         use_combat: bool = param(False, description="Combat補正を使用するか")
         seed: int = get_global_seed()
-        target: str = param('morph', choices=['morph', 'patho2', 'merged'])
+        dataset: str = param('morph', choices=['morph', 'patho2', 'merged'])
 
     def prepare(self, a: CommonArgs):
         fix_global_seed(a.seed)
@@ -136,11 +134,23 @@ class BaseMLCLI(AutoCLI):
         self.dataset_merged = merge_dataset(self.dataset_morph, self.dataset_patho2)
 
         # Combat補正を適用
+        subdir = 'raw'
         if a.use_combat:
             self._apply_combat_correction()
+            subdir = 'combat'
 
-        # 解析対象データセットを設定
-        self._set_target_dataset(a.target)
+        """解析対象データセットを設定"""
+        if a.dataset == 'morph':
+            self.dataset = self.dataset_morph
+        elif a.dataset == 'patho2':
+            self.dataset = self.dataset_patho2
+        elif a.dataset == 'merged':
+            self.dataset = self.dataset_merged
+        else:
+            raise ValueError(f"Unknown dataset: {a.dataset}")
+
+        self.output_dir = f'out/{subdir}/{a.dataset}'
+        os.makedirs(self.output_dir, exist_ok=True)
 
 
     def _apply_combat_correction(self):
@@ -187,61 +197,45 @@ class BaseMLCLI(AutoCLI):
         # mergedデータセットも再作成
         self.dataset_merged = merge_dataset(self.dataset_morph, self.dataset_patho2)
 
-    def _set_target_dataset(self, target: str):
-        """解析対象データセットを設定"""
-        if target == 'morph':
-            self.dataset = self.dataset_morph
-        elif target == 'patho2':
-            self.dataset = self.dataset_patho2
-        elif target == 'merged':
-            self.dataset = self.dataset_merged
-        else:
-            raise ValueError(f"Unknown target: {target}")
-
-        # 特徴量カラムを取得
-        self.feature_cols = [col for col in self.dataset.merged_data.columns if col.startswith('feature_')]
-
-        print(f"解析対象データセット: {target} ({len(self.dataset.merged_data)} samples)")
 
 
-
-class CLI(BaseMLCLI):
-    class UmapArgs(BaseMLCLI.CommonArgs):
+class CLI(ExperimentCLI):
+    class UmapArgs(ExperimentCLI.CommonArgs):
         # foo: str = param('defaut', l='--foooo', s='-f') # l for long param, s for short
         pass
 
     def run_umap(self, a: UmapArgs):
         """UMAP可視化を実行"""
         features = self.dataset.features
-        
+
         # UMAP実行
         reducer = umap.UMAP(random_state=a.seed, n_components=2)
         embedding = reducer.fit_transform(features)
-        
+
         # プロット作成
         plt.figure(figsize=(10, 8))
-        
+
         # データセット別に色分け（mergedの場合）
-        if a.target == 'merged' and 'dataset' in self.dataset.merged_data.columns:
+        if a.dataset == 'merged' and 'dataset' in self.dataset.merged_data.columns:
             datasets = self.dataset.merged_data['dataset'].values
             # embeddingとdatasetsのサイズを合わせる
             min_size = min(len(embedding), len(datasets))
             embedding_subset = embedding[:min_size]
             datasets_subset = datasets[:min_size]
-            
+
             for ds in np.unique(datasets_subset):
                 mask = datasets_subset == ds
-                plt.scatter(embedding_subset[mask, 0], embedding_subset[mask, 1], 
+                plt.scatter(embedding_subset[mask, 0], embedding_subset[mask, 1],
                            label=f'{ds}', alpha=0.7, s=50)
             plt.legend()
         else:
             plt.scatter(embedding[:, 0], embedding[:, 1], alpha=0.7, s=50)
-        
-        plt.title(f'UMAP - {a.target} (Combat: {a.use_combat})')
+
+        plt.title(f'UMAP - {a.dataset} (Combat: {a.use_combat})')
         plt.xlabel('UMAP 1')
         plt.ylabel('UMAP 2')
         plt.show()
-        
+
         print(f"UMAP完了: {len(features)} samples, {features.shape[1]} features")
         return True
 

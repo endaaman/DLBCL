@@ -10,8 +10,6 @@ import numpy as np
 from matplotlib import pyplot as plt, colors as mcolors
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-from .cli import BaseMLCLI
-
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
 
