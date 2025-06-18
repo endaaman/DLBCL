@@ -36,7 +36,7 @@ import matplotlib.patches as patches
 import scanpy as sc
 import anndata as ad
 
-from .utils import BaseMLCLI, BaseMLArgs
+from .utils import BaseMLCLI
 from .utils.data_loader import load_common_data
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')

@@ -35,7 +35,7 @@ import matplotlib.patches as patches
 import scanpy as sc
 import anndata as ad
 
-from .utils import BaseMLCLI, BaseMLArgs
+from .utils import BaseMLCLI
 from .utils.data_loader import load_common_data
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
@@ -327,36 +327,36 @@ class CLI(BaseMLCLI):
 
     def run_combat_comparison(self, a: CombatComparisonArgs):
         """Compare UMAP embeddings before and after Combat correction"""
-        
+
         print("Combat補正前後のUMAP比較を開始...")
-        
+
         # 両データセットの補正前データを読み込み
         morph_dict = load_common_data('morph')
         patho2_dict = load_common_data('patho2')
-        
+
         if morph_dict is None or patho2_dict is None:
             raise RuntimeError("データセット読み込みに失敗しました")
-        
+
         # 補正前データの結合
         morph_features_raw = morph_dict['features']
         patho2_features_raw = patho2_dict['features']
         combined_features_raw = np.vstack([morph_features_raw, patho2_features_raw])
-        
+
         # Combat補正データの取得
         corrected_features = self._apply_combat_correction(morph_dict, patho2_dict)
-        
+
         # データセットラベル作成
         n_morph = len(morph_dict['patient_ids'])
         n_patho2 = len(patho2_dict['patient_ids'])
         dataset_labels = ['Morph'] * n_morph + ['Patho2'] * n_patho2
-        
+
         # 特徴量標準化
         scaler_raw = StandardScaler()
         scaled_features_raw = scaler_raw.fit_transform(combined_features_raw)
-        
+
         scaler_corrected = StandardScaler()
         scaled_features_corrected = scaler_corrected.fit_transform(corrected_features)
-        
+
         # UMAP埋め込み（補正前）
         print("UMAP埋め込み（補正前）...")
         reducer_raw = UMAP(
@@ -368,7 +368,7 @@ class CLI(BaseMLCLI):
             n_jobs=1,
         )
         embedding_raw = reducer_raw.fit_transform(scaled_features_raw)
-        
+
         # UMAP埋め込み（補正後）
         print("UMAP埋め込み（補正後）...")
         reducer_corrected = UMAP(
@@ -380,12 +380,12 @@ class CLI(BaseMLCLI):
             n_jobs=1,
         )
         embedding_corrected = reducer_corrected.fit_transform(scaled_features_corrected)
-        
+
         # 並列プロット作成
         fig, axes = plt.subplots(1, 2, figsize=(20, 8))
-        
+
         colors = {'Morph': 'blue', 'Patho2': 'red'}
-        
+
         # 補正前プロット
         for dataset in ['Morph', 'Patho2']:
             mask = np.array(dataset_labels) == dataset
@@ -398,8 +398,8 @@ class CLI(BaseMLCLI):
         axes[0].set_ylabel('UMAP Dimension 2')
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
-        
-        # 補正後プロット  
+
+        # 補正後プロット
         for dataset in ['Morph', 'Patho2']:
             mask = np.array(dataset_labels) == dataset
             axes[1].scatter(
@@ -411,44 +411,44 @@ class CLI(BaseMLCLI):
         axes[1].set_ylabel('UMAP Dimension 2')
         axes[1].legend()
         axes[1].grid(True, alpha=0.3)
-        
+
         plt.tight_layout()
-        
+
         # 保存
         output_dir = self.base_output_path / 'comparison'
         output_dir.mkdir(parents=True, exist_ok=True)
         plot_file = output_dir / 'umap_combat_comparison.png'
         plt.savefig(plot_file, dpi=300, bbox_inches='tight')
         print(f'Combat比較プロットを保存: {plot_file}')
-        
+
         # 分離度の定量評価
         self._evaluate_batch_separation(embedding_raw, embedding_corrected, dataset_labels, output_dir)
-        
+
         plt.show()
-        
+
     def _evaluate_batch_separation(self, embedding_raw, embedding_corrected, dataset_labels, output_dir):
         """バッチ効果の分離度を定量評価"""
         from sklearn.metrics import silhouette_score
-        
+
         # データセットラベルを数値に変換
         label_mapping = {'Morph': 0, 'Patho2': 1}
         numeric_labels = [label_mapping[label] for label in dataset_labels]
-        
+
         # シルエット係数計算（高いほどバッチ分離が強い = 悪い）
         sil_raw = silhouette_score(embedding_raw, numeric_labels)
         sil_corrected = silhouette_score(embedding_corrected, numeric_labels)
-        
+
         print(f"\\n=== バッチ効果評価 ===")
         print(f"シルエット係数（補正前）: {sil_raw:.3f}")
         print(f"シルエット係数（補正後）: {sil_corrected:.3f}")
         print(f"改善度: {sil_raw - sil_corrected:.3f} ({'改善' if sil_corrected < sil_raw else '悪化'})")
-        
+
         # 結果をCSVで保存
         evaluation_df = pd.DataFrame({
             'metric': ['silhouette_before', 'silhouette_after', 'improvement'],
             'value': [sil_raw, sil_corrected, sil_raw - sil_corrected]
         })
-        
+
         eval_file = output_dir / 'combat_evaluation.csv'
         evaluation_df.to_csv(eval_file, index=False)
         print(f"評価結果を保存: {eval_file}")

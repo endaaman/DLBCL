@@ -10,7 +10,7 @@ import numpy as np
 from matplotlib import pyplot as plt, colors as mcolors
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
-from .cli import BaseMLCLI, BaseMLArgs
+from .cli import BaseMLCLI
 
 
 

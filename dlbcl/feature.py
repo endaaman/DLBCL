@@ -14,7 +14,7 @@ from pydantic_autocli import param
 from sklearn.utils import resample
 from statsmodels.stats.multitest import multipletests
 
-from .utils import BaseMLCLI, BaseMLArgs
+from .utils import BaseMLCLI
 from .utils.data_loader import load_common_data
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
