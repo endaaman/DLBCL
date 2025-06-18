@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import scanpy as sc
@@ -9,6 +11,7 @@ from umap import UMAP
 from pydantic_autocli import param
 
 from .utils.cli import ExperimentCLI
+from .utils.dataset import load_dataset, merge_dataset
 
 
 class CLI(ExperimentCLI):
@@ -51,6 +54,7 @@ class CLI(ExperimentCLI):
         target: str = param('Age', description="可視化対象（臨床変数名、leiden_cluster等）")
         n_neighbors: int = param(15, description="UMAP近傍数")
         min_dist: float = param(0.1, description="UMAP最小距離")
+        noshow: bool = False
 
     def run_visualize(self, a: VisualizeArgs):
         """UMAP埋め込みによる統一的可視化"""
@@ -131,20 +135,19 @@ class CLI(ExperimentCLI):
         plt.ylabel('UMAP 2')
 
         # 保存
-        plot_file = f'{self.output_dir}/umap_{a.target.replace(" ", "_")}.png'
-        plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+        plot_file = Path(f'{self.output_dir}/umap/{a.target.replace(" ", "_")}.png')
+        os.makedirs(plot_file.parent, exist_ok=True)
+        plt.savefig(str(plot_file), dpi=300, bbox_inches='tight')
         print(f"可視化保存: {plot_file}")
 
-        plt.show()
-        return True
+        if not a.noshow:
+            plt.show()
 
     class CombatComparisonArgs(ExperimentCLI.CommonArgs):
         n_neighbors: int = param(15, description="UMAP近傍数")
         min_dist: float = param(0.1, description="UMAP最小距離")
 
     def run_combat_comparison(self, a: CombatComparisonArgs):
-        """Combat補正前後のUMAP比較"""
-        from .utils.cli import load_dataset, merge_dataset
 
         # 補正前データ読み込み（Combat補正されていない生データ）
         dataset_morph_raw = load_dataset('morph')
@@ -218,7 +221,6 @@ class CLI(ExperimentCLI):
         print(f"評価結果保存: {eval_file}")
 
         plt.show()
-        return True
 
 
 if __name__ == '__main__':
