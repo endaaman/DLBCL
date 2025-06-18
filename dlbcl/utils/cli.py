@@ -15,8 +15,13 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from pydantic_autocli import AutoCLI, param
 from combat.pycombat import pycombat
+import umap
+import matplotlib.pyplot as plt
 
-from .seed import fix_global_seed, get_global_seed
+try:
+    from .seed import fix_global_seed, get_global_seed
+except ImportError:
+    from dlbcl.utils.seed import fix_global_seed, get_global_seed
 
 
 @dataclass
@@ -27,18 +32,19 @@ class Dataset:
     target_cols: list
     feature_df: pd.DataFrame = None
     merged_data: pd.DataFrame = None
-    
+
     def __post_init__(self):
         """データフレーム作成とマージ処理"""
         # 特徴量データフレーム作成
         self.feature_df = pd.DataFrame(self.features, columns=[f'feature_{i}' for i in range(self.features.shape[1])])
-        self.feature_df['patient_id'] = self.feature_names.astype(str)
-        
-        # 臨床データの patient_id を文字列に変換
-        self.clinical_data['patient_id'] = self.clinical_data['patient_id'].astype(str)
-        
+        self.feature_df['patient_id'] = self.feature_names
+
+        # 臨床データのコピーを作成し、patient_id を文字列に変換
+        clinical_data_copy = self.clinical_data.copy()
+        clinical_data_copy['patient_id'] = clinical_data_copy['patient_id'].astype(str)
+
         # データマージ
-        self.merged_data = self.feature_df.merge(self.clinical_data, on='patient_id', how='inner')
+        self.merged_data = self.feature_df.merge(clinical_data_copy, on='patient_id', how='inner')
         print(f"Dataset created: {len(self.merged_data)} samples")
 
 
@@ -60,14 +66,14 @@ def load_dataset(dataset: str) -> Dataset:
         target_cols = ['MYC IHC', 'BCL2 IHC', 'BCL6 IHC', 'CD10 IHC', 'MUM1 IHC', 'HANS', 'Age']
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
-    
+
     print(f"Clinical data loaded: {len(clinical_data)} patients")
-    
+
     # 特徴量データ読み込み
     with h5py.File(f'{base_dir}/slide_features.h5', 'r') as f:
         features = f['features'][:]
-        feature_names = f['names'][:]
-    
+        feature_names = f['names'][:].astype(str)
+
     return Dataset(
         features=features,
         feature_names=feature_names,
@@ -79,31 +85,31 @@ def load_dataset(dataset: str) -> Dataset:
 def merge_dataset(dataset_morph: Dataset, dataset_patho2: Dataset) -> Dataset:
     """両データセットを結合してmergedデータセットを作成"""
     print("mergedデータセットを作成中...")
-    
+
     # 特徴量データを結合
     combined_features = np.vstack([dataset_morph.features, dataset_patho2.features])
-    
+
     # 特徴量名を結合
     combined_feature_names = np.concatenate([dataset_morph.feature_names, dataset_patho2.feature_names])
-    
+
     # 臨床データを結合（共通カラムのみ）
     morph_clinical = dataset_morph.clinical_data.copy()
     patho2_clinical = dataset_patho2.clinical_data.copy()
-    
+
     # データセット識別子を追加
     morph_clinical['dataset'] = 'morph'
     patho2_clinical['dataset'] = 'patho2'
-    
+
     # 共通カラムで結合
     common_cols = list(set(morph_clinical.columns) & set(patho2_clinical.columns))
     combined_clinical = pd.concat([
         morph_clinical[common_cols],
         patho2_clinical[common_cols]
     ], ignore_index=True)
-    
+
     # 共通ターゲットカラムを設定
     target_cols = ['Age']
-    
+
     return Dataset(
         features=combined_features,
         feature_names=combined_feature_names,
@@ -125,14 +131,14 @@ class BaseMLCLI(AutoCLI):
         # 両方のデータセットを読み込み
         self.dataset_morph = load_dataset('morph')
         self.dataset_patho2 = load_dataset('patho2')
-        
+
         # mergedデータセットを作成
         self.dataset_merged = merge_dataset(self.dataset_morph, self.dataset_patho2)
-        
+
         # Combat補正を適用
         if a.use_combat:
             self._apply_combat_correction()
-            
+
         # 解析対象データセットを設定
         self._set_target_dataset(a.target)
 
@@ -140,47 +146,47 @@ class BaseMLCLI(AutoCLI):
     def _apply_combat_correction(self):
         """Combat補正を両データセット間に適用"""
         print("Combat補正を適用中...")
-        
+
         # 特徴量データを結合
         morph_features = self.dataset_morph.features
         patho2_features = self.dataset_patho2.features
         combined_features = np.vstack([morph_features, patho2_features])
-        
+
         # バッチ変数作成（データセット識別子）
         n_morph = len(self.dataset_morph.feature_names)
         n_patho2 = len(self.dataset_patho2.feature_names)
         batch = np.array([0] * n_morph + [1] * n_patho2)
-        
+
         # NaNを含む特徴量を除外
         valid_features = ~np.isnan(combined_features).any(axis=0)
         if not valid_features.any():
             print("警告: すべての特徴量にNaNが含まれています")
             return
-            
+
         features_clean = combined_features[:, valid_features]
-        
+
         # pycombatはDataFrameを期待するため変換
         features_df = pd.DataFrame(features_clean.T)
         corrected_df = pycombat(features_df, batch)
         corrected_clean = corrected_df.values.T
-        
+
         # 元の形状に戻す
         corrected_features = combined_features.copy()
         corrected_features[:, valid_features] = corrected_clean
-        
+
         print(f"Combat補正成功: {corrected_features.shape[1]}特徴量中{valid_features.sum()}特徴量を補正")
-        
+
         # 補正後の特徴量を各データセットに書き戻し
         self.dataset_morph.features = corrected_features[:n_morph]
         self.dataset_patho2.features = corrected_features[n_morph:]
-        
+
         # 各データセットのデータフレームを再構築
         self.dataset_morph.__post_init__()
         self.dataset_patho2.__post_init__()
-        
+
         # mergedデータセットも再作成
         self.dataset_merged = merge_dataset(self.dataset_morph, self.dataset_patho2)
-        
+
     def _set_target_dataset(self, target: str):
         """解析対象データセットを設定"""
         if target == 'morph':
@@ -191,9 +197,55 @@ class BaseMLCLI(AutoCLI):
             self.dataset = self.dataset_merged
         else:
             raise ValueError(f"Unknown target: {target}")
-            
+
         # 特徴量カラムを取得
         self.feature_cols = [col for col in self.dataset.merged_data.columns if col.startswith('feature_')]
-        
+
         print(f"解析対象データセット: {target} ({len(self.dataset.merged_data)} samples)")
+
+
+
+class CLI(BaseMLCLI):
+    class UmapArgs(BaseMLCLI.CommonArgs):
+        # foo: str = param('defaut', l='--foooo', s='-f') # l for long param, s for short
+        pass
+
+    def run_umap(self, a: UmapArgs):
+        """UMAP可視化を実行"""
+        features = self.dataset.features
+        
+        # UMAP実行
+        reducer = umap.UMAP(random_state=a.seed, n_components=2)
+        embedding = reducer.fit_transform(features)
+        
+        # プロット作成
+        plt.figure(figsize=(10, 8))
+        
+        # データセット別に色分け（mergedの場合）
+        if a.target == 'merged' and 'dataset' in self.dataset.merged_data.columns:
+            datasets = self.dataset.merged_data['dataset'].values
+            # embeddingとdatasetsのサイズを合わせる
+            min_size = min(len(embedding), len(datasets))
+            embedding_subset = embedding[:min_size]
+            datasets_subset = datasets[:min_size]
+            
+            for ds in np.unique(datasets_subset):
+                mask = datasets_subset == ds
+                plt.scatter(embedding_subset[mask, 0], embedding_subset[mask, 1], 
+                           label=f'{ds}', alpha=0.7, s=50)
+            plt.legend()
+        else:
+            plt.scatter(embedding[:, 0], embedding[:, 1], alpha=0.7, s=50)
+        
+        plt.title(f'UMAP - {a.target} (Combat: {a.use_combat})')
+        plt.xlabel('UMAP 1')
+        plt.ylabel('UMAP 2')
+        plt.show()
+        
+        print(f"UMAP完了: {len(features)} samples, {features.shape[1]} features")
+        return True
+
+if __name__ == '__main__':
+    cli = CLI()
+    cli.run()
 

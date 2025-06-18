@@ -12,6 +12,8 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 from .cli import BaseMLCLI
 
+warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
+
 
 
 def yes_no_prompt(question):
