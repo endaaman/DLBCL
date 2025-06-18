@@ -9,7 +9,8 @@
       "Bash(ls:*)",
       "Bash(uv add:*)",
       "Bash(rg:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(uv:*)"
     ],
     "deny": []
   }
