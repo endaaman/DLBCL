@@ -21,29 +21,29 @@ class CLI(BaseMLCLI):
     class CommonArgs(BaseMLCLI.CommonArgs):
         pass
 
-    def apply_thresholds(self, data, target_col, dataset):
-        """データセット別の閾値処理を適用"""
-        if dataset == 'morph':
-            if target_col == 'MYC IHC':
-                return (data >= 40).astype(int)
-            elif target_col == 'BCL2 IHC':
-                return (data >= 50).astype(int)
-            elif target_col == 'BCL6 IHC':
-                return (data >= 30).astype(int)
-            else:
-                # その他のカラムは既にバイナリ
-                unique_vals = data.unique()
-                if set(unique_vals).issubset({0, 1}):
-                    return data.astype(int)
-                else:
-                    return (data == unique_vals[1]).astype(int) if len(unique_vals) == 2 else data
-        else:
-            # Patho2は既にバイナリ
-            unique_vals = data.unique()
-            if set(unique_vals).issubset({0, 1}):
-                return data.astype(int)
-            else:
-                return (data == unique_vals[1]).astype(int) if len(unique_vals) == 2 else data
+    # def apply_thresholds(self, data, target_col, dataset):
+    #     """データセット別の閾値処理を適用"""
+    #     if dataset == 'morph':
+    #         if target_col == 'MYC IHC':
+    #             return (data >= 40).astype(int)
+    #         elif target_col == 'BCL2 IHC':
+    #             return (data >= 50).astype(int)
+    #         elif target_col == 'BCL6 IHC':
+    #             return (data >= 30).astype(int)
+    #         else:
+    #             # その他のカラムは既にバイナリ
+    #             unique_vals = data.unique()
+    #             if set(unique_vals).issubset({0, 1}):
+    #                 return data.astype(int)
+    #             else:
+    #                 return (data == unique_vals[1]).astype(int) if len(unique_vals) == 2 else data
+    #     else:
+    #         # Patho2は既にバイナリ
+    #         unique_vals = data.unique()
+    #         if set(unique_vals).issubset({0, 1}):
+    #             return data.astype(int)
+    #         else:
+    #             return (data == unique_vals[1]).astype(int) if len(unique_vals) == 2 else data
 
     class WeightAnalysisArgs(CommonArgs):
         """重み解析引数"""
@@ -85,7 +85,8 @@ class CLI(BaseMLCLI):
             y_raw = self.merged_data[target_col][mask].copy()
 
             # データセット別バイナリ化
-            y_clean = self.apply_thresholds(y_raw, target_col, a.dataset)
+            # BaseMLCLIで補正済み
+            # y_clean = self.apply_thresholds(y_raw, target_col, a.dataset)
 
             print(f"  サンプル数: {len(y_clean)}")
             print(f"  正例: {y_clean.sum()}, 負例: {len(y_clean) - y_clean.sum()}")
