@@ -33,7 +33,6 @@ class CLI(ExperimentCLI):
         # 臨床データのみ使用
         clinical_data = self.dataset.merged_data.copy()
         print(f"臨床データ: {len(clinical_data)} 患者")
-        print(f"利用可能な列: {list(clinical_data.columns)}")
 
         # 解析対象の臨床変数を定義
         numeric_vars = []
@@ -41,88 +40,101 @@ class CLI(ExperimentCLI):
 
         # 全ての候補変数
         all_candidates = {
-            'ihc_markers': ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC'],
+            'pathology_markers': ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC', 'HANS', 'EBV',
+                                 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH'],
             'clinical_numeric': ['Age', 'OS', 'PFS'],
-            'clinical_categorical': ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)',
-                                   'Follow-up Status', 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH', 'EBV']
+            'clinical_categorical': ['LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)', 'Follow-up Status']
         }
-        
+
         # データ型に基づいて自動分類
         for category, candidates in all_candidates.items():
             for var in candidates:
                 if var not in clinical_data.columns:
                     continue
-                
+
                 # 生存データの除外チェック
                 if not a.include_survival and var in ['OS', 'PFS']:
                     continue
-                
+
                 # 有効データの確認
                 valid_data = clinical_data[var].dropna()
                 if len(valid_data) < a.min_samples:
                     continue
-                
+
                 unique_values = valid_data.unique()
-                
+
                 # データ型による分類
                 if len(unique_values) <= 10 or set(unique_values) <= {0, 1, 0.0, 1.0}:
                     categorical_vars.append(var)
                 else:
                     numeric_vars.append(var)
-                    
+
         all_vars = numeric_vars + categorical_vars
-        
+
         print(f"データ型に基づく自動分類結果:")
         print(f"  連続値変数: {numeric_vars}")
         print(f"  カテゴリカル変数: {categorical_vars[:10]}{'...' if len(categorical_vars) > 10 else ''}")
         print(f"解析対象変数: {len(all_vars)} 個")
         print(f"  - 連続値: {len(numeric_vars)} 個 ({numeric_vars[:5]}...)")
         print(f"  - カテゴリカル: {len(categorical_vars)} 個 ({categorical_vars[:5]}...)")
-        
-        # 極端に偏った変数の警告
-        print("\n=== 極端に偏った変数の警告 ===")
-        extreme_vars = []
-        
+
+        # 変数の分布概要表示
+        print("\n=== 変数の分布概要 ===")
         for var in all_vars:
             valid_values = clinical_data[var].dropna()
-            if len(valid_values) < a.min_samples:
-                extreme_vars.append(var)
-                print(f"  警告: {var} - サンプル数不足")
+            if len(valid_values) == 0:
+                print(f"  {var}: データなし")
                 continue
-                
-            unique_vals = valid_values.value_counts()
-            if len(unique_vals) == 1:
-                extreme_vars.append(var)
-                print(f"  警告: {var} - 単一値のみ")
-                continue
-                
-            # 最頻値の割合チェック
-            max_ratio = unique_vals.iloc[0] / len(valid_values)
-            if max_ratio > 0.95:
-                extreme_vars.append(var)
-                print(f"  警告: {var} - 最頻値が{max_ratio:.1%}")
-                continue
-                
-            # 二値データチェック
-            if set(unique_vals.index) <= {0, 1, 0.0, 1.0}:
-                extreme_vars.append(var)
-                print(f"  警告: {var} - 二値データ（0/1のみ）")
-        
-        if extreme_vars:
-            print(f"\n注意: {len(extreme_vars)}個の変数が極端に偏っているため、統計解析結果が不安定になる可能性があります")
+
+            if var in numeric_vars:
+                # 連続値
+                mean_val = valid_values.mean()
+                std_val = valid_values.std()
+                print(f"  {var}: 平均={mean_val:.2f}±{std_val:.2f} (n={len(valid_values)})")
+            else:
+                # カテゴリカル
+                value_counts = valid_values.value_counts()
+                total = len(valid_values)
+
+                # 二値変数（0/1）は順序を統一、それ以外は頻度順
+                if set(value_counts.index) <= {0, 1, 0.0, 1.0}:
+                    # 0, 1の順序で統一
+                    ordered_values = [0, 1]
+                    value_counts = value_counts.reindex([v for v in ordered_values if v in value_counts.index])
+
+                # 上位3つまで表示
+                top_values = []
+                for val, count in value_counts.head(3).items():
+                    pct = count / total * 100
+                    # 数値は整数で表示
+                    if isinstance(val, (int, float)) and val == int(val):
+                        val_str = str(int(val))
+                    else:
+                        val_str = str(val)
+                    top_values.append(f"{val_str}:{pct:.0f}%")
+
+                ratio_str = " ".join(top_values)
+                if len(value_counts) > 3:
+                    ratio_str += " ..."
+
+                print(f"  {var}: {ratio_str} (n={total})")
+
 
         # 解析実行
 
-        # 1. 連続値変数間の相関解析
+        # 1. 分布のプロット作成
+        self._create_distribution_plots(clinical_data, numeric_vars, categorical_vars, output_dir)
+
+        # 2. 連続値変数間の相関解析
         self._analyze_numeric_correlations(clinical_data, numeric_vars, a, output_dir)
 
-        # 2. カテゴリカル変数間の関連解析
+        # 3. カテゴリカル変数間の関連解析
         self._analyze_categorical_associations(clinical_data, categorical_vars, a, output_dir)
 
-        # 3. 連続値 vs カテゴリカル変数の解析
+        # 4. 連続値 vs カテゴリカル変数の解析
         self._analyze_mixed_associations(clinical_data, numeric_vars, categorical_vars, a, output_dir)
 
-        # 4. 包括的相関マトリックス作成
+        # 5. 包括的相関マトリックス作成
         self._create_comprehensive_clinical_matrix(clinical_data, all_vars, a, output_dir)
 
         print(f"\n臨床データ相関解析完了！結果は {output_dir} に保存されました")
@@ -152,28 +164,28 @@ class CLI(ExperimentCLI):
 
                 if len(subset) < a.min_samples:
                     continue
-                    
+
                 # 定数チェック
                 if subset[var1].std() == 0 or subset[var2].std() == 0:
                     print(f"  警告: {var1} と {var2} の片方が定数のため相関計算をスキップ")
                     continue
-                
+
                 try:
                     if a.correlation_method == 'pearson':
                         corr, p_val = pearsonr(subset[var1], subset[var2])
                     else:
                         corr, p_val = spearmanr(subset[var1], subset[var2])
-                    
+
                     # NaNチェック
                     if np.isnan(corr) or np.isnan(p_val):
                         print(f"  警告: {var1} と {var2} の相関計算でNaNが発生")
                         continue
-                    
+
                     correlation_matrix[i, j] = corr
                     correlation_matrix[j, i] = corr
                     p_value_matrix[i, j] = p_val
                     p_value_matrix[j, i] = p_val
-                    
+
                     results.append({
                         'variable_1': var1,
                         'variable_2': var2,
@@ -193,25 +205,25 @@ class CLI(ExperimentCLI):
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-            
+
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-            
+
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('correlation', key=abs, ascending=False)
             results_df.to_csv(output_dir / 'numeric_correlations.csv', index=False)
-            
+
             # 有意な相関を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な相関（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-            
+
             if len(significant_results) > 0:
                 print("トップ5の有意な相関:")
                 for _, row in significant_results.head().iterrows():
                     print(f"  {row['variable_1']} - {row['variable_2']}: r={row['correlation']:.3f}, p={row['p_corrected']:.3e}")
-        
+
         # ヒートマップ作成
         if len(numeric_vars) >= 2:
             self._create_correlation_heatmap(correlation_matrix, numeric_vars, a, output_dir, 'numeric')
@@ -239,13 +251,13 @@ class CLI(ExperimentCLI):
 
                 if len(subset) < a.min_samples:
                     continue
-                    
+
                 try:
                     crosstab = pd.crosstab(subset[var1], subset[var2])
-                    
+
                     if crosstab.size <= 1:
                         continue
-                    
+
                     if crosstab.shape == (2, 2) and crosstab.min().min() >= 5:
                         # Fisher's exact test
                         _, p_val = fisher_exact(crosstab)
@@ -255,11 +267,11 @@ class CLI(ExperimentCLI):
                         # Chi-square test
                         chi2, p_val, dof, expected = chi2_contingency(crosstab)
                         test_method = 'Chi-square'
-                    
+
                     # Cramér's V
                     n = crosstab.sum().sum()
                     cramers_v = np.sqrt(chi2 / (n * (min(crosstab.shape) - 1))) if chi2 else np.nan
-                    
+
                     results.append({
                         'variable_1': var1,
                         'variable_2': var2,
@@ -275,20 +287,20 @@ class CLI(ExperimentCLI):
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-            
+
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-            
+
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('p_corrected')
             results_df.to_csv(output_dir / 'categorical_associations.csv', index=False)
-            
+
             # 有意な関連を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な関連（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-            
+
             if len(significant_results) > 0:
                 print("トップ5の有意な関連:")
                 for _, row in significant_results.head().iterrows():
@@ -314,7 +326,7 @@ class CLI(ExperimentCLI):
 
                 if len(subset) < a.min_samples:
                     continue
-                    
+
                 try:
                     # カテゴリ別のグループを作成
                     groups = []
@@ -322,10 +334,10 @@ class CLI(ExperimentCLI):
                         group_data = subset[subset[categorical_var] == category][numeric_var]
                         if len(group_data) >= 3:  # 最低3サンプル
                             groups.append(group_data)
-                    
+
                     if len(groups) < 2:
                         continue
-                    
+
                     # 検定実施
                     if len(groups) == 2:
                         stat, p_val = mannwhitneyu(groups[0], groups[1], alternative='two-sided')
@@ -333,7 +345,7 @@ class CLI(ExperimentCLI):
                     else:
                         stat, p_val = kruskal(*groups)
                         test_method = 'Kruskal-Wallis'
-                    
+
                     # 効果サイズ計算
                     all_values = subset[numeric_var]
                     overall_std = all_values.std()
@@ -342,7 +354,7 @@ class CLI(ExperimentCLI):
                     else:
                         group_means = [group.mean() for group in groups]
                         effect_size = (max(group_means) - min(group_means)) / overall_std
-                    
+
                     results.append({
                         'numeric_variable': numeric_var,
                         'categorical_variable': categorical_var,
@@ -359,20 +371,20 @@ class CLI(ExperimentCLI):
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-            
+
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-            
+
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('p_corrected')
             results_df.to_csv(output_dir / 'mixed_associations.csv', index=False)
-            
+
             # 有意な関連を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な関連（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-            
+
             if len(significant_results) > 0:
                 print("トップ5の有意な関連:")
                 for _, row in significant_results.head().iterrows():
@@ -489,6 +501,89 @@ class CLI(ExperimentCLI):
         plt.savefig(output_dir / 'comprehensive_clinical_heatmap.png', dpi=300, bbox_inches='tight')
         plt.savefig(output_dir / 'comprehensive_clinical_heatmap.pdf', bbox_inches='tight')
         plt.close()
+
+    def _create_distribution_plots(self, data, numeric_vars, categorical_vars, output_dir):
+        """変数の分布をプロット"""
+
+        # 連続値変数のヒストグラム
+        if numeric_vars:
+            n_numeric = len(numeric_vars)
+            fig, axes = plt.subplots(1, n_numeric, figsize=(5*n_numeric, 4))
+            if n_numeric == 1:
+                axes = [axes]
+
+            for i, var in enumerate(numeric_vars):
+                valid_data = data[var].dropna()
+                axes[i].hist(valid_data, bins=20, alpha=0.7, edgecolor='black')
+                mean_val = valid_data.mean()
+                std_val = valid_data.std()
+                axes[i].axvline(mean_val, color='red', linestyle='--', label=f'Mean={mean_val:.1f}')
+                axes[i].set_title(f'{var}\n(n={len(valid_data)})')
+                axes[i].set_xlabel(var)
+                axes[i].set_ylabel('Frequency')
+                axes[i].legend()
+
+            plt.tight_layout()
+            plt.savefig(output_dir / 'distributions_numeric.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+        # カテゴリカル変数の棒グラフ
+        if categorical_vars:
+            # 変数数に応じてレイアウト調整
+            n_vars = len(categorical_vars)
+            n_cols = min(3, n_vars)
+            n_rows = (n_vars + n_cols - 1) // n_cols
+
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
+            if n_vars == 1:
+                axes = [axes]
+            elif n_rows == 1:
+                axes = axes.flatten() if n_cols > 1 else [axes]
+            else:
+                axes = axes.flatten()
+
+            for i, var in enumerate(categorical_vars):
+                valid_data = data[var].dropna()
+                value_counts = valid_data.value_counts()
+
+                # 値でソート
+                sorted_indices = sorted(value_counts.index)
+                value_counts = value_counts.reindex(sorted_indices)
+
+                # 値を整数表示に変換
+                labels = []
+                for val in value_counts.index:
+                    if isinstance(val, (int, float)) and val == int(val):
+                        labels.append(str(int(val)))
+                    else:
+                        labels.append(str(val))
+
+                bars = axes[i].bar(labels, value_counts.values, alpha=0.7, edgecolor='black')
+
+                # パーセンテージをバーの上に表示
+                total = len(valid_data)
+                for j, (bar, count) in enumerate(zip(bars, value_counts.values)):
+                    pct = count / total * 100
+                    axes[i].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                               f'{pct:.0f}%', ha='center', va='bottom', fontsize=9)
+
+                axes[i].set_title(f'{var}\n(n={total})')
+                axes[i].set_xlabel(var)
+                axes[i].set_ylabel('Frequency')
+
+                # x軸ラベルの回転
+                if len(labels) > 5:
+                    axes[i].tick_params(axis='x', rotation=45)
+
+            # 余ったサブプロットを非表示
+            for i in range(len(categorical_vars), len(axes)):
+                axes[i].set_visible(False)
+
+            plt.tight_layout()
+            plt.savefig(output_dir / 'distributions_categorical.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+        print(f"分布プロットを保存: {output_dir}")
 
 
 if __name__ == '__main__':
