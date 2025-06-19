@@ -12,19 +12,15 @@ from pydantic import Field
 from pydantic_autocli import param
 from statsmodels.stats.multitest import multipletests
 
-from .utils import ExperimentCLI
-from .utils.data_loader import load_common_data
+from .utils.cli import ExperimentCLI
 
 warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
 
 class CLI(ExperimentCLI):
-    class CommonArgs(BaseMLCLI.CommonArgs):
-        pass
 
-    class ClinicalCorrelationArgs(CommonArgs):
+    class ClinicalCorrelationArgs(ExperimentCLI.CommonArgs):
         """臨床データのみの相関解析引数"""
-        output_dir: str = param('', description="出力ディレクトリ (デフォルト: out/{dataset}/clinical_correlation)")
         correlation_method: str = param('pearson', choices=['pearson', 'spearman'], description="相関係数の種類")
         fdr_alpha: float = param(0.05, description="False Discovery Rateの閾値")
         min_samples: int = param(10, description="相関計算に必要な最小サンプル数")
@@ -35,15 +31,12 @@ class CLI(ExperimentCLI):
 
         print(f"臨床データ相関解析開始: dataset={a.dataset}")
 
-        if not a.output_dir:
-            a.output_dir = f'out/{a.dataset}/clinical_correlation'
-
-        # 出力ディレクトリ作成
-        output_dir = Path(a.output_dir)
+        # 基底クラスのoutput_dirに追加パスを付ける
+        output_dir = self.output_dir / 'clinical_correlation'
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 臨床データのみ使用
-        clinical_data = self.clinical_data.copy()
+        clinical_data = self.dataset.merged_data.copy()
         print(f"臨床データ: {len(clinical_data)} 患者")
         print(f"利用可能な列: {list(clinical_data.columns)}")
 
@@ -51,33 +44,80 @@ class CLI(ExperimentCLI):
         numeric_vars = []
         categorical_vars = []
 
-        # 免疫染色マーカー（連続値）- 両データセットで同じ列名
-        ihc_markers = ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC']
+        # 極端に偏った変数を検出する関数
+        def check_extreme_distribution(col_name, values):
+            """変数の分布が極端に偏っているかチェック"""
+            valid_values = values.dropna()
+            if len(valid_values) < a.min_samples:
+                return True, "サンプル数不足"
 
-        print(f"IHCマーカー候補: {ihc_markers}")
-        available_ihc = [var for var in ihc_markers if var in clinical_data.columns]
-        print(f"利用可能なIHCマーカー: {available_ihc}")
-        numeric_vars.extend(available_ihc)
+            unique_vals = valid_values.value_counts()
+            if len(unique_vals) == 1:
+                return True, "単一値のみ"
 
-        # 年齢・その他連続値
-        other_numeric = ['Age']
-        if a.include_survival:
-            other_numeric.extend(['OS', 'PFS'])
-        numeric_vars.extend([var for var in other_numeric if var in clinical_data.columns])
+            # 最頻値の割合をチェック（95%以上なら極端に偏っている）
+            max_ratio = unique_vals.iloc[0] / len(valid_values)
+            if max_ratio > 0.95:
+                return True, f"最頻値が{max_ratio:.1%}"
 
-        # カテゴリカル変数 - 共通変数を優先
-        categorical_candidates = ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)',
-                                'Follow-up Status', 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH', 'EBV']
+            # 二値変数（0/1のみ）の場合も警告
+            if set(unique_vals.index) <= {0, 1, 0.0, 1.0}:
+                return True, "二値データ（0/1のみ）"
 
-        print(f"カテゴリカル変数候補: {categorical_candidates}")
-        available_categorical = [var for var in categorical_candidates if var in clinical_data.columns]
-        print(f"利用可能なカテゴリカル変数: {available_categorical}")
-        categorical_vars.extend(available_categorical)
+            return False, None
+
+        # 全ての候補変数
+        all_candidates = {
+            'ihc_markers': ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC'],
+            'clinical_numeric': ['Age', 'OS', 'PFS'],
+            'clinical_categorical': ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)',
+                                   'Follow-up Status', 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH', 'EBV']
+        }
+
+        # データ型に基づいて自動分類
+        for category, candidates in all_candidates.items():
+            for var in candidates:
+                if var not in clinical_data.columns:
+                    continue
+
+                # 生存データは除外する場合
+                if not a.include_survival and var in ['OS', 'PFS']:
+                    continue
+
+                # 実際のデータを確認して分類
+                valid_data = clinical_data[var].dropna()
+                if len(valid_data) < a.min_samples:
+                    continue
+
+                unique_values = valid_data.unique()
+
+                # 二値データ（0/1）または少数のカテゴリカル値の場合
+                if len(unique_values) <= 10 or set(unique_values) <= {0, 1, 0.0, 1.0}:
+                    categorical_vars.append(var)
+                else:
+                    # 真の連続値
+                    numeric_vars.append(var)
+
+        print(f"データ型に基づく自動分類結果:")
+        print(f"  連続値変数: {numeric_vars}")
+        print(f"  カテゴリカル変数: {categorical_vars[:10]}{'...' if len(categorical_vars) > 10 else ''}")
 
         all_vars = numeric_vars + categorical_vars
         print(f"解析対象変数: {len(all_vars)} 個")
         print(f"  - 連続値: {len(numeric_vars)} 個 ({numeric_vars[:5]}...)")
         print(f"  - カテゴリカル: {len(categorical_vars)} 個 ({categorical_vars[:5]}...)")
+
+        # 極端に偏った変数の警告
+        print("\n=== 極端に偏った変数の警告 ===")
+        extreme_vars = []
+        for var in all_vars:
+            is_extreme, reason = check_extreme_distribution(var, clinical_data[var])
+            if is_extreme:
+                extreme_vars.append(var)
+                print(f"  警告: {var} - {reason}")
+
+        if extreme_vars:
+            print(f"\n注意: {len(extreme_vars)}個の変数が極端に偏っているため、統計解析結果が不安定になる可能性があります")
 
         # 1. 連続値変数間の相関解析
         self._analyze_numeric_correlations(clinical_data, numeric_vars, a, output_dir)
@@ -118,10 +158,20 @@ class CLI(ExperimentCLI):
 
                 if len(subset) >= a.min_samples:
                     try:
+                        # 定数チェック（標準偏差が0の場合は相関計算不可）
+                        if subset[var1].std() == 0 or subset[var2].std() == 0:
+                            print(f"  警告: {var1} と {var2} の片方が定数のため相関計算をスキップ")
+                            continue
+
                         if a.correlation_method == 'pearson':
                             corr, p_val = pearsonr(subset[var1], subset[var2])
                         else:
                             corr, p_val = spearmanr(subset[var1], subset[var2])
+
+                        # NaNチェック
+                        if np.isnan(corr) or np.isnan(p_val):
+                            print(f"  警告: {var1} と {var2} の相関計算でNaNが発生")
+                            continue
 
                         correlation_matrix[i, j] = corr
                         correlation_matrix[j, i] = corr  # 対称行列
@@ -135,7 +185,8 @@ class CLI(ExperimentCLI):
                             'p_value': p_val,
                             'n_samples': len(subset)
                         })
-                    except:
+                    except Exception as e:
+                        print(f"  エラー: {var1} vs {var2} - {str(e)}")
                         pass
 
         # 対角線は1に設定

@@ -55,8 +55,8 @@ class ExperimentCLI(AutoCLI):
         else:
             raise ValueError(f"Unknown dataset: {a.dataset}")
 
-        self.output_dir = f'out/{subdir}/{a.dataset}'
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir = Path(f'out/{subdir}/{a.dataset}')
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
 
     def _apply_combat_correction(self):

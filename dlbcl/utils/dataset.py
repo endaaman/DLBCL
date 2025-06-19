@@ -46,7 +46,7 @@ def load_dataset(dataset: str) -> Dataset:
         clinical_data['BCL6 IHC'] = (clinical_data['BCL6 IHC'] >= 30).astype(int)
     elif dataset == 'patho2':
         base_dir = 'data/DLBCL-Patho2'
-        clinical_data = pd.read_csv(f'{base_dir}/clinical_data_cleaned_path2_mod.csv')
+        clinical_data = pd.read_csv(f'{base_dir}/clinical_data_cleaned_path2_mod2.csv')
         # NOTE: patho2はEBVをエクストラで持つが、臨床情報がない
         target_cols = ['MYC IHC', 'BCL2 IHC', 'BCL6 IHC', 'CD10 IHC', 'MUM1 IHC', 'HANS', 'EBV',
                        'Age']
