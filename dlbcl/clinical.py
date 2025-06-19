@@ -1,20 +1,15 @@
-import os
-import warnings
 from pathlib import Path
+from typing import List, Tuple, Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
-from scipy.stats import pearsonr, spearmanr, chi2_contingency, mannwhitneyu, fisher_exact
-from scipy.cluster.hierarchy import dendrogram, linkage
-from pydantic import Field
+from scipy.stats import pearsonr, spearmanr, chi2_contingency, mannwhitneyu, fisher_exact, kruskal
 from pydantic_autocli import param
 from statsmodels.stats.multitest import multipletests
 
 from .utils.cli import ExperimentCLI
-
-warnings.filterwarnings('ignore', category=FutureWarning, message='.*force_all_finite.*')
 
 
 class CLI(ExperimentCLI):
@@ -44,28 +39,6 @@ class CLI(ExperimentCLI):
         numeric_vars = []
         categorical_vars = []
 
-        # 極端に偏った変数を検出する関数
-        def check_extreme_distribution(col_name, values):
-            """変数の分布が極端に偏っているかチェック"""
-            valid_values = values.dropna()
-            if len(valid_values) < a.min_samples:
-                return True, "サンプル数不足"
-
-            unique_vals = valid_values.value_counts()
-            if len(unique_vals) == 1:
-                return True, "単一値のみ"
-
-            # 最頻値の割合をチェック（95%以上なら極端に偏っている）
-            max_ratio = unique_vals.iloc[0] / len(valid_values)
-            if max_ratio > 0.95:
-                return True, f"最頻値が{max_ratio:.1%}"
-
-            # 二値変数（0/1のみ）の場合も警告
-            if set(unique_vals.index) <= {0, 1, 0.0, 1.0}:
-                return True, "二値データ（0/1のみ）"
-
-            return False, None
-
         # 全ての候補変数
         all_candidates = {
             'ihc_markers': ['CD10 IHC', 'MUM1 IHC', 'BCL2 IHC', 'BCL6 IHC', 'MYC IHC'],
@@ -73,51 +46,72 @@ class CLI(ExperimentCLI):
             'clinical_categorical': ['HANS', 'LDH', 'ECOG PS', 'Stage', 'IPI Risk Group (4 Class)',
                                    'Follow-up Status', 'BCL2 FISH', 'BCL6 FISH', 'MYC FISH', 'EBV']
         }
-
+        
         # データ型に基づいて自動分類
         for category, candidates in all_candidates.items():
             for var in candidates:
                 if var not in clinical_data.columns:
                     continue
-
-                # 生存データは除外する場合
+                
+                # 生存データの除外チェック
                 if not a.include_survival and var in ['OS', 'PFS']:
                     continue
-
-                # 実際のデータを確認して分類
+                
+                # 有効データの確認
                 valid_data = clinical_data[var].dropna()
                 if len(valid_data) < a.min_samples:
                     continue
-
+                
                 unique_values = valid_data.unique()
-
-                # 二値データ（0/1）または少数のカテゴリカル値の場合
+                
+                # データ型による分類
                 if len(unique_values) <= 10 or set(unique_values) <= {0, 1, 0.0, 1.0}:
                     categorical_vars.append(var)
                 else:
-                    # 真の連続値
                     numeric_vars.append(var)
-
+                    
+        all_vars = numeric_vars + categorical_vars
+        
         print(f"データ型に基づく自動分類結果:")
         print(f"  連続値変数: {numeric_vars}")
         print(f"  カテゴリカル変数: {categorical_vars[:10]}{'...' if len(categorical_vars) > 10 else ''}")
-
-        all_vars = numeric_vars + categorical_vars
         print(f"解析対象変数: {len(all_vars)} 個")
         print(f"  - 連続値: {len(numeric_vars)} 個 ({numeric_vars[:5]}...)")
         print(f"  - カテゴリカル: {len(categorical_vars)} 個 ({categorical_vars[:5]}...)")
-
+        
         # 極端に偏った変数の警告
         print("\n=== 極端に偏った変数の警告 ===")
         extreme_vars = []
+        
         for var in all_vars:
-            is_extreme, reason = check_extreme_distribution(var, clinical_data[var])
-            if is_extreme:
+            valid_values = clinical_data[var].dropna()
+            if len(valid_values) < a.min_samples:
                 extreme_vars.append(var)
-                print(f"  警告: {var} - {reason}")
-
+                print(f"  警告: {var} - サンプル数不足")
+                continue
+                
+            unique_vals = valid_values.value_counts()
+            if len(unique_vals) == 1:
+                extreme_vars.append(var)
+                print(f"  警告: {var} - 単一値のみ")
+                continue
+                
+            # 最頻値の割合チェック
+            max_ratio = unique_vals.iloc[0] / len(valid_values)
+            if max_ratio > 0.95:
+                extreme_vars.append(var)
+                print(f"  警告: {var} - 最頻値が{max_ratio:.1%}")
+                continue
+                
+            # 二値データチェック
+            if set(unique_vals.index) <= {0, 1, 0.0, 1.0}:
+                extreme_vars.append(var)
+                print(f"  警告: {var} - 二値データ（0/1のみ）")
+        
         if extreme_vars:
             print(f"\n注意: {len(extreme_vars)}個の変数が極端に偏っているため、統計解析結果が不安定になる可能性があります")
+
+        # 解析実行
 
         # 1. 連続値変数間の相関解析
         self._analyze_numeric_correlations(clinical_data, numeric_vars, a, output_dir)
@@ -156,38 +150,39 @@ class CLI(ExperimentCLI):
                 # 有効なデータを取得
                 subset = data[[var1, var2]].dropna()
 
-                if len(subset) >= a.min_samples:
-                    try:
-                        # 定数チェック（標準偏差が0の場合は相関計算不可）
-                        if subset[var1].std() == 0 or subset[var2].std() == 0:
-                            print(f"  警告: {var1} と {var2} の片方が定数のため相関計算をスキップ")
-                            continue
-
-                        if a.correlation_method == 'pearson':
-                            corr, p_val = pearsonr(subset[var1], subset[var2])
-                        else:
-                            corr, p_val = spearmanr(subset[var1], subset[var2])
-
-                        # NaNチェック
-                        if np.isnan(corr) or np.isnan(p_val):
-                            print(f"  警告: {var1} と {var2} の相関計算でNaNが発生")
-                            continue
-
-                        correlation_matrix[i, j] = corr
-                        correlation_matrix[j, i] = corr  # 対称行列
-                        p_value_matrix[i, j] = p_val
-                        p_value_matrix[j, i] = p_val
-
-                        results.append({
-                            'variable_1': var1,
-                            'variable_2': var2,
-                            'correlation': corr,
-                            'p_value': p_val,
-                            'n_samples': len(subset)
-                        })
-                    except Exception as e:
-                        print(f"  エラー: {var1} vs {var2} - {str(e)}")
-                        pass
+                if len(subset) < a.min_samples:
+                    continue
+                    
+                # 定数チェック
+                if subset[var1].std() == 0 or subset[var2].std() == 0:
+                    print(f"  警告: {var1} と {var2} の片方が定数のため相関計算をスキップ")
+                    continue
+                
+                try:
+                    if a.correlation_method == 'pearson':
+                        corr, p_val = pearsonr(subset[var1], subset[var2])
+                    else:
+                        corr, p_val = spearmanr(subset[var1], subset[var2])
+                    
+                    # NaNチェック
+                    if np.isnan(corr) or np.isnan(p_val):
+                        print(f"  警告: {var1} と {var2} の相関計算でNaNが発生")
+                        continue
+                    
+                    correlation_matrix[i, j] = corr
+                    correlation_matrix[j, i] = corr
+                    p_value_matrix[i, j] = p_val
+                    p_value_matrix[j, i] = p_val
+                    
+                    results.append({
+                        'variable_1': var1,
+                        'variable_2': var2,
+                        'correlation': corr,
+                        'p_value': p_val,
+                        'n_samples': len(subset)
+                    })
+                except Exception as e:
+                    print(f"  エラー: {var1} vs {var2} - {str(e)}")
 
         # 対角線は1に設定
         for i in range(len(numeric_vars)):
@@ -198,26 +193,27 @@ class CLI(ExperimentCLI):
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-
+            
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-
+            
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('correlation', key=abs, ascending=False)
             results_df.to_csv(output_dir / 'numeric_correlations.csv', index=False)
-
+            
             # 有意な相関を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な相関（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-
+            
             if len(significant_results) > 0:
                 print("トップ5の有意な相関:")
                 for _, row in significant_results.head().iterrows():
                     print(f"  {row['variable_1']} - {row['variable_2']}: r={row['correlation']:.3f}, p={row['p_corrected']:.3e}")
-
-            # 相関行列のヒートマップ作成
+        
+        # ヒートマップ作成
+        if len(numeric_vars) >= 2:
             self._create_correlation_heatmap(correlation_matrix, numeric_vars, a, output_dir, 'numeric')
 
         print(f"連続値変数相関解析完了: {len(results)} ペア解析")
@@ -241,55 +237,58 @@ class CLI(ExperimentCLI):
                 # 有効なデータを取得
                 subset = data[[var1, var2]].dropna()
 
-                if len(subset) >= a.min_samples:
-                    try:
-                        # クロス集計表作成
-                        crosstab = pd.crosstab(subset[var1], subset[var2])
-
-                        # 期待度数が5未満のセルが80%未満の場合のみカイ二乗検定実行
-                        if crosstab.size > 1:
-                            if crosstab.shape == (2, 2) and crosstab.min().min() >= 5:
-                                # 2×2表でFisher's exact test
-                                _, p_val = fisher_exact(crosstab)
-                                test_method = 'Fisher'
-                            else:
-                                # カイ二乗検定
-                                chi2, p_val, dof, expected = chi2_contingency(crosstab)
-                                test_method = 'Chi-square'
-
-                            # Cramér's V を効果サイズとして計算
-                            n = crosstab.sum().sum()
-                            cramers_v = np.sqrt(chi2 / (n * (min(crosstab.shape) - 1))) if test_method == 'Chi-square' else np.nan
-
-                            results.append({
-                                'variable_1': var1,
-                                'variable_2': var2,
-                                'test_method': test_method,
-                                'effect_size': cramers_v,
-                                'p_value': p_val,
-                                'n_samples': len(subset)
-                            })
-                    except:
-                        pass
+                if len(subset) < a.min_samples:
+                    continue
+                    
+                try:
+                    crosstab = pd.crosstab(subset[var1], subset[var2])
+                    
+                    if crosstab.size <= 1:
+                        continue
+                    
+                    if crosstab.shape == (2, 2) and crosstab.min().min() >= 5:
+                        # Fisher's exact test
+                        _, p_val = fisher_exact(crosstab)
+                        test_method = 'Fisher'
+                        chi2 = None
+                    else:
+                        # Chi-square test
+                        chi2, p_val, dof, expected = chi2_contingency(crosstab)
+                        test_method = 'Chi-square'
+                    
+                    # Cramér's V
+                    n = crosstab.sum().sum()
+                    cramers_v = np.sqrt(chi2 / (n * (min(crosstab.shape) - 1))) if chi2 else np.nan
+                    
+                    results.append({
+                        'variable_1': var1,
+                        'variable_2': var2,
+                        'test_method': test_method,
+                        'effect_size': cramers_v,
+                        'p_value': p_val,
+                        'n_samples': len(subset)
+                    })
+                except:
+                    pass
 
         if results:
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-
+            
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-
+            
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('p_corrected')
             results_df.to_csv(output_dir / 'categorical_associations.csv', index=False)
-
+            
             # 有意な関連を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な関連（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-
+            
             if len(significant_results) > 0:
                 print("トップ5の有意な関連:")
                 for _, row in significant_results.head().iterrows():
@@ -313,61 +312,67 @@ class CLI(ExperimentCLI):
                 # 有効なデータを取得
                 subset = data[[numeric_var, categorical_var]].dropna()
 
-                if len(subset) >= a.min_samples:
-                    try:
-                        # カテゴリ別の値を取得
-                        groups = []
-                        for category in subset[categorical_var].unique():
-                            group_data = subset[subset[categorical_var] == category][numeric_var]
-                            if len(group_data) >= 3:  # 最低3サンプル
-                                groups.append(group_data)
-
-                        if len(groups) >= 2:
-                            # Mann-Whitney U test (2群) または Kruskal-Wallis test (3群以上)
-                            if len(groups) == 2:
-                                stat, p_val = mannwhitneyu(groups[0], groups[1], alternative='two-sided')
-                                test_method = 'Mann-Whitney'
-                            else:
-                                from scipy.stats import kruskal
-                                stat, p_val = kruskal(*groups)
-                                test_method = 'Kruskal-Wallis'
-
-                            # 効果サイズ（群間の標準化された差）
-                            all_values = subset[numeric_var]
-                            overall_std = all_values.std()
-                            group_means = [group.mean() for group in groups]
-                            effect_size = (max(group_means) - min(group_means)) / overall_std if overall_std > 0 else 0
-
-                            results.append({
-                                'numeric_variable': numeric_var,
-                                'categorical_variable': categorical_var,
-                                'test_method': test_method,
-                                'effect_size': effect_size,
-                                'p_value': p_val,
-                                'n_samples': len(subset),
-                                'n_groups': len(groups)
-                            })
-                    except:
-                        pass
+                if len(subset) < a.min_samples:
+                    continue
+                    
+                try:
+                    # カテゴリ別のグループを作成
+                    groups = []
+                    for category in subset[categorical_var].unique():
+                        group_data = subset[subset[categorical_var] == category][numeric_var]
+                        if len(group_data) >= 3:  # 最低3サンプル
+                            groups.append(group_data)
+                    
+                    if len(groups) < 2:
+                        continue
+                    
+                    # 検定実施
+                    if len(groups) == 2:
+                        stat, p_val = mannwhitneyu(groups[0], groups[1], alternative='two-sided')
+                        test_method = 'Mann-Whitney'
+                    else:
+                        stat, p_val = kruskal(*groups)
+                        test_method = 'Kruskal-Wallis'
+                    
+                    # 効果サイズ計算
+                    all_values = subset[numeric_var]
+                    overall_std = all_values.std()
+                    if overall_std == 0:
+                        effect_size = 0
+                    else:
+                        group_means = [group.mean() for group in groups]
+                        effect_size = (max(group_means) - min(group_means)) / overall_std
+                    
+                    results.append({
+                        'numeric_variable': numeric_var,
+                        'categorical_variable': categorical_var,
+                        'test_method': test_method,
+                        'effect_size': effect_size,
+                        'p_value': p_val,
+                        'n_samples': len(subset),
+                        'n_groups': len(groups)
+                    })
+                except:
+                    pass
 
         if results:
             # 多重検定補正
             p_values = [r['p_value'] for r in results]
             corrected_p = multipletests(p_values, method='fdr_bh')[1]
-
+            
             for i, result in enumerate(results):
                 result['p_corrected'] = corrected_p[i]
                 result['significant'] = corrected_p[i] < a.fdr_alpha
-
+            
             # 結果をDataFrameに保存
             results_df = pd.DataFrame(results)
             results_df = results_df.sort_values('p_corrected')
             results_df.to_csv(output_dir / 'mixed_associations.csv', index=False)
-
+            
             # 有意な関連を表示
             significant_results = results_df[results_df['significant']]
             print(f"有意な関連（FDR < {a.fdr_alpha}）: {len(significant_results)} 個")
-
+            
             if len(significant_results) > 0:
                 print("トップ5の有意な関連:")
                 for _, row in significant_results.head().iterrows():
